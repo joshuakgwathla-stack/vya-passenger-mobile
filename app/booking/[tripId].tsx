@@ -5,6 +5,7 @@ import {
 } from 'react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
+import * as Location from 'expo-location'
 import { tripsApi, bookingsApi, paymentsApi } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { COLORS } from '../../constants'
@@ -17,17 +18,69 @@ export default function BookingScreen() {
   const [trip, setTrip] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [seats, setSeats] = useState(1)
-  const [pickup, setPickup] = useState('')
   const [dropoff, setDropoff] = useState('')
   const [booking, setBooking] = useState(false)
   const [paying, setPaying] = useState(false)
+
+  // Location state
+  const [locationLoading, setLocationLoading] = useState(true)
+  const [locationDenied, setLocationDenied] = useState(false)
+  const [detectedLocation, setDetectedLocation] = useState<string>('')  // e.g. "Sandton, Gauteng"
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null)
+  const [pickupOverride, setPickupOverride] = useState<string>('')      // if user manually edits
+  const [editingPickup, setEditingPickup] = useState(false)
 
   useEffect(() => {
     tripsApi.getTrip(tripId)
       .then(({ data }) => setTrip(data.data))
       .catch(() => Alert.alert('Error', 'Could not load trip details'))
       .finally(() => setLoading(false))
+
+    detectLocation()
   }, [tripId])
+
+  const detectLocation = async () => {
+    setLocationLoading(true)
+    setLocationDenied(false)
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      if (status !== 'granted') {
+        setLocationDenied(true)
+        setLocationLoading(false)
+        return
+      }
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+
+      const [place] = await Location.reverseGeocodeAsync({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+      })
+
+      if (place) {
+        // Build a human-readable pickup label: suburb/city + province
+        const suburb = place.district || place.subregion || place.city || ''
+        const city = place.city || place.subregion || ''
+        const province = place.region || ''
+        // Use suburb if available and different from city, otherwise just city + province
+        let label = ''
+        if (suburb && suburb !== city) {
+          label = `${suburb}, ${city || province}`
+        } else if (city) {
+          label = province ? `${city}, ${province}` : city
+        } else {
+          label = province
+        }
+        setDetectedLocation(label)
+      } else {
+        setDetectedLocation('')
+      }
+    } catch {
+      setDetectedLocation('')
+    } finally {
+      setLocationLoading(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -45,9 +98,19 @@ export default function BookingScreen() {
   const total = (pricePerSeat * seats).toFixed(2)
   const availableSeats = trip.available_seats ?? 0
 
+  // The address actually sent to the API
+  const effectivePickup = editingPickup
+    ? pickupOverride
+    : (detectedLocation || pickupOverride)
+
   const handleBook = async () => {
-    if (!pickup.trim()) {
-      Alert.alert('Pickup required', 'Please enter where the driver should pick you up.')
+    if (!effectivePickup.trim()) {
+      Alert.alert(
+        'Pickup required',
+        locationDenied
+          ? 'Please type your pickup address, or enable location permission in Settings.'
+          : 'We couldn\'t detect your location. Please type your pickup address.'
+      )
       return
     }
     setBooking(true)
@@ -55,7 +118,7 @@ export default function BookingScreen() {
       const { data } = await bookingsApi.create({
         trip_id: tripId,
         seats_booked: seats,
-        pickup_address: pickup,
+        pickup_address: effectivePickup,
         dropoff_address: dropoff,
         passengers: [{
           name: `${user?.first_name} ${user?.last_name}`,
@@ -125,7 +188,7 @@ export default function BookingScreen() {
             </View>
             <View style={styles.heroLine} />
             <View style={styles.heroCity}>
-              <View style={styles.dotNavy} />
+              <View style={styles.dotGold} />
               <Text style={styles.heroCityText}>{trip.destination_city}</Text>
             </View>
           </View>
@@ -194,24 +257,98 @@ export default function BookingScreen() {
         {/* Pickup & drop-off */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Pickup & drop-off</Text>
+
           <View style={styles.addressBlock}>
+            {/* ── Pickup row (GPS auto-detect) ── */}
             <View style={styles.addressRow}>
               <View style={styles.addressDotGreen} />
-              <TextInput
-                style={styles.addressInput}
-                placeholder="Pickup address *"
-                placeholderTextColor={COLORS.textMuted}
-                value={pickup}
-                onChangeText={setPickup}
-                multiline
-              />
+              <View style={styles.pickupContent}>
+                {locationLoading ? (
+                  <View style={styles.detectingRow}>
+                    <ActivityIndicator color={COLORS.navy} size="small" />
+                    <Text style={styles.detectingText}>Detecting your location…</Text>
+                  </View>
+                ) : locationDenied ? (
+                  // Permission denied — show manual input
+                  <View style={{ flex: 1 }}>
+                    <TextInput
+                      style={styles.addressInput}
+                      placeholder="Your pickup address *"
+                      placeholderTextColor={COLORS.textMuted}
+                      value={pickupOverride}
+                      onChangeText={setPickupOverride}
+                      multiline
+                      autoFocus
+                    />
+                    <TouchableOpacity onPress={detectLocation} style={styles.retryBtn}>
+                      <Text style={styles.retryText}>📍 Retry location</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : editingPickup ? (
+                  // Manual edit mode
+                  <View style={{ flex: 1 }}>
+                    <TextInput
+                      style={styles.addressInput}
+                      placeholder="e.g. 10 Rivonia Rd, Sandton"
+                      placeholderTextColor={COLORS.textMuted}
+                      value={pickupOverride}
+                      onChangeText={setPickupOverride}
+                      multiline
+                      autoFocus
+                    />
+                    {detectedLocation ? (
+                      <TouchableOpacity
+                        onPress={() => { setEditingPickup(false); setPickupOverride('') }}
+                        style={styles.retryBtn}
+                      >
+                        <Text style={styles.retryText}>↩ Use detected location</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                ) : detectedLocation ? (
+                  // GPS detected — show as a locked pill with edit option
+                  <View style={styles.detectedRow}>
+                    <View style={styles.detectedPill}>
+                      <Text style={styles.detectedIcon}>📍</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.detectedLabel}>Detected location</Text>
+                        <Text style={styles.detectedValue}>{detectedLocation}</Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => { setEditingPickup(true); setPickupOverride(detectedLocation) }}
+                      style={styles.editBtn}
+                    >
+                      <Text style={styles.editBtnText}>Edit</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  // GPS returned no result — fall back to manual
+                  <View style={{ flex: 1 }}>
+                    <TextInput
+                      style={styles.addressInput}
+                      placeholder="Your pickup address *"
+                      placeholderTextColor={COLORS.textMuted}
+                      value={pickupOverride}
+                      onChangeText={setPickupOverride}
+                      multiline
+                    />
+                    <TouchableOpacity onPress={detectLocation} style={styles.retryBtn}>
+                      <Text style={styles.retryText}>📍 Try detecting again</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
             </View>
+
             <View style={styles.addressConnector} />
+
+            {/* ── Drop-off row (always manual) ── */}
             <View style={styles.addressRow}>
               <View style={styles.addressDotNavy} />
               <TextInput
                 style={styles.addressInput}
-                placeholder="Drop-off (optional)"
+                placeholder={`Drop-off in ${trip.destination_city} (optional)`}
                 placeholderTextColor={COLORS.textMuted}
                 value={dropoff}
                 onChangeText={setDropoff}
@@ -219,8 +356,9 @@ export default function BookingScreen() {
               />
             </View>
           </View>
+
           <Text style={styles.addressHint}>
-            Your driver will confirm exact pickup once booked.
+            Your driver uses your pickup location to find you. The more specific, the better.
           </Text>
         </View>
 
@@ -241,7 +379,6 @@ export default function BookingScreen() {
           </View>
         </View>
 
-        {/* Spacer for sticky footer */}
         <View style={{ height: 120 }} />
       </ScrollView>
 
@@ -252,9 +389,9 @@ export default function BookingScreen() {
           <Text style={styles.payBarTotal}>R{total}</Text>
         </View>
         <TouchableOpacity
-          style={[styles.payBtn, (booking || paying) && styles.payBtnBusy]}
+          style={[styles.payBtn, (booking || paying || locationLoading) && styles.payBtnBusy]}
           onPress={handleBook}
-          disabled={booking || paying}
+          disabled={booking || paying || locationLoading}
           activeOpacity={0.85}
         >
           {booking || paying ? (
@@ -286,16 +423,13 @@ const styles = StyleSheet.create({
 
   scroll: { padding: 16, gap: 14 },
 
-  // Hero card
-  heroCard: {
-    backgroundColor: COLORS.navy, borderRadius: 20, padding: 20, gap: 16,
-  },
-  heroRoute: { flexDirection: 'row', alignItems: 'center', gap: 0 },
+  heroCard: { backgroundColor: COLORS.navy, borderRadius: 20, padding: 20, gap: 16 },
+  heroRoute: { flexDirection: 'row', alignItems: 'center' },
   heroCity: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
   heroCityText: { fontSize: 16, fontWeight: '800', color: COLORS.white },
-  heroLine: { flex: 0, width: 20, height: 2, backgroundColor: 'rgba(255,255,255,0.3)', marginHorizontal: 4 },
+  heroLine: { width: 20, height: 2, backgroundColor: 'rgba(255,255,255,0.3)', marginHorizontal: 4 },
   dotGreen: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#34d399' },
-  dotNavy: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.gold },
+  dotGold: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.gold },
 
   heroMeta: { flexDirection: 'row', alignItems: 'center' },
   heroMetaItem: { flex: 1, alignItems: 'center' },
@@ -309,16 +443,11 @@ const styles = StyleSheet.create({
   driverName: { fontSize: 14, fontWeight: '700', color: COLORS.white },
   driverMeta: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 1 },
 
-  // Shared card
   card: { backgroundColor: COLORS.white, borderRadius: 16, padding: 18 },
   cardTitle: { fontSize: 14, fontWeight: '700', color: COLORS.navy, marginBottom: 14 },
 
-  // Seats
   seatRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  seatBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: COLORS.navy, alignItems: 'center', justifyContent: 'center',
-  },
+  seatBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.navy, alignItems: 'center', justifyContent: 'center' },
   seatBtnDisabled: { backgroundColor: COLORS.border },
   seatBtnText: { fontSize: 22, color: 'white', fontWeight: '700', lineHeight: 26 },
   seatCountBox: { width: 52, alignItems: 'center' },
@@ -326,31 +455,44 @@ const styles = StyleSheet.create({
   seatLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: -2 },
   pricePerSeat: { fontSize: 13, color: COLORS.textSecondary, marginLeft: 'auto' as any },
 
-  // Address
-  addressBlock: {
-    borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, overflow: 'hidden',
-  },
+  addressBlock: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, overflow: 'hidden' },
   addressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14 },
   addressConnector: { height: 1, backgroundColor: COLORS.border, marginLeft: 40 },
-  addressDotGreen: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#34d399', marginTop: 5 },
-  addressDotNavy: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.navy, marginTop: 5 },
-  addressInput: { flex: 1, fontSize: 14, color: COLORS.text, minHeight: 40, paddingTop: 0 },
+  addressDotGreen: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#34d399', marginTop: 8 },
+  addressDotNavy: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.navy, marginTop: 8 },
+  addressInput: { flex: 1, fontSize: 14, color: COLORS.text, minHeight: 40, paddingTop: 4 },
   addressHint: { fontSize: 12, color: COLORS.textMuted, marginTop: 10, lineHeight: 18 },
 
-  // Steps
-  stepsCard: {
-    backgroundColor: COLORS.white, borderRadius: 16, padding: 18, gap: 14,
+  // Pickup-specific
+  pickupContent: { flex: 1 },
+  detectingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  detectingText: { fontSize: 14, color: COLORS.textSecondary },
+
+  detectedRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  detectedPill: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: COLORS.offWhite, borderRadius: 10, padding: 10,
   },
+  detectedIcon: { fontSize: 16 },
+  detectedLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 },
+  detectedValue: { fontSize: 14, fontWeight: '700', color: COLORS.navy, marginTop: 1 },
+
+  editBtn: {
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+    backgroundColor: COLORS.navy,
+  },
+  editBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.white },
+
+  retryBtn: { marginTop: 6 },
+  retryText: { fontSize: 12, color: COLORS.navy, fontWeight: '600' },
+
+  stepsCard: { backgroundColor: COLORS.white, borderRadius: 16, padding: 18, gap: 14 },
   stepsTitle: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
   step: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
-  stepNum: {
-    width: 24, height: 24, borderRadius: 12,
-    backgroundColor: COLORS.navy, alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  },
+  stepNum: { width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.navy, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   stepNumText: { fontSize: 12, fontWeight: '700', color: COLORS.gold },
   stepText: { flex: 1, fontSize: 13, color: COLORS.textSecondary, lineHeight: 20, paddingTop: 2 },
 
-  // Sticky pay bar
   payBar: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     backgroundColor: COLORS.white,

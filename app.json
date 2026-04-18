@@ -36,6 +36,13 @@
       "expo-secure-store",
       "expo-web-browser",
       [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Vya needs your location to auto-fill your pickup point.",
+          "locationWhenInUsePermission": "Vya needs your location to auto-fill your pickup point."
+        }
+      ],
+      [
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
