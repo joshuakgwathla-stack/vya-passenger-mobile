@@ -33,6 +33,7 @@ export default function BookingScreen() {
     return (
       <View style={styles.center}>
         <ActivityIndicator color={COLORS.navy} size="large" />
+        <Text style={styles.loadingText}>Loading trip details...</Text>
       </View>
     )
   }
@@ -40,10 +41,15 @@ export default function BookingScreen() {
   if (!trip) return null
 
   const dep = new Date(trip.departure_time)
-  const total = (Number(trip.price_per_seat) * seats).toFixed(2)
+  const pricePerSeat = Number(trip.price_per_seat)
+  const total = (pricePerSeat * seats).toFixed(2)
+  const availableSeats = trip.available_seats ?? 0
 
   const handleBook = async () => {
-    if (!pickup.trim()) { Alert.alert('Required', 'Please enter your pickup address'); return }
+    if (!pickup.trim()) {
+      Alert.alert('Pickup required', 'Please enter where the driver should pick you up.')
+      return
+    }
     setBooking(true)
     try {
       const { data } = await bookingsApi.create({
@@ -60,195 +66,309 @@ export default function BookingScreen() {
       })
       const bookingId = data.data.id
       setPaying(true)
-      // Initiate PayFast payment
       const payRes = await paymentsApi.initiate(bookingId)
       const payUrl = payRes.data.data?.redirect_url || payRes.data.data?.payment_url
       if (payUrl) {
-        const result = await WebBrowser.openBrowserAsync(payUrl)
-        // Check payment status after browser closes
+        await WebBrowser.openBrowserAsync(payUrl)
         const statusRes = await paymentsApi.getStatus(bookingId)
         const status = statusRes.data.data?.payment_status
         if (status === 'paid') {
-          Alert.alert('Booking confirmed! 🎉', 'Your seat is booked. Check your bookings tab.')
+          Alert.alert('Booking confirmed!', 'Your seat is secured. Check My Trips for details.')
           router.replace(`/trip/${trip.id}?bookingId=${bookingId}`)
         } else {
-          Alert.alert('Payment pending', 'Complete your payment to confirm the booking.', [
-            { text: 'View Booking', onPress: () => router.replace(`/trip/${trip.id}?bookingId=${bookingId}`) },
+          Alert.alert('Payment pending', 'Finish payment to confirm your seat.', [
+            { text: 'View Trip', onPress: () => router.replace(`/trip/${trip.id}?bookingId=${bookingId}`) },
           ])
         }
       } else {
         router.replace(`/trip/${trip.id}?bookingId=${bookingId}`)
       }
     } catch (err: any) {
-      Alert.alert('Error', err.response?.data?.message || 'Booking failed. Please try again.')
+      Alert.alert('Booking failed', err.response?.data?.message || 'Please try again.')
     } finally {
       setBooking(false)
       setPaying(false)
     }
   }
 
+  const dayLabel = (() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
+    const d = new Date(dep); d.setHours(0, 0, 0, 0)
+    if (d.getTime() === today.getTime()) return 'Today'
+    if (d.getTime() === tomorrow.getTime()) return 'Tomorrow'
+    return dep.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'short' })
+  })()
+
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.back}>
-            <Text style={styles.backText}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Book Trip</Text>
-        </View>
+      {/* Top bar */}
+      <View style={styles.topBar}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Text style={styles.backArrow}>←</Text>
+        </TouchableOpacity>
+        <Text style={styles.topTitle}>Book your seat</Text>
+        <View style={{ width: 36 }} />
+      </View>
 
-        {/* Trip summary */}
-        <View style={styles.tripCard}>
-          <Text style={styles.route}>{trip.origin_city} → {trip.destination_city}</Text>
-          <Text style={styles.tripMeta}>
-            {dep.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' })}
-            {' · '}
-            {dep.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false })}
-          </Text>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Trip hero card */}
+        <View style={styles.heroCard}>
+          <View style={styles.heroRoute}>
+            <View style={styles.heroCity}>
+              <View style={styles.dotGreen} />
+              <Text style={styles.heroCityText}>{trip.origin_city}</Text>
+            </View>
+            <View style={styles.heroLine} />
+            <View style={styles.heroCity}>
+              <View style={styles.dotNavy} />
+              <Text style={styles.heroCityText}>{trip.destination_city}</Text>
+            </View>
+          </View>
+
+          <View style={styles.heroMeta}>
+            <View style={styles.heroMetaItem}>
+              <Text style={styles.heroMetaLabel}>Date</Text>
+              <Text style={styles.heroMetaValue}>{dayLabel}</Text>
+            </View>
+            <View style={styles.heroMetaDivider} />
+            <View style={styles.heroMetaItem}>
+              <Text style={styles.heroMetaLabel}>Departs</Text>
+              <Text style={styles.heroMetaValue}>
+                {dep.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false })}
+              </Text>
+            </View>
+            <View style={styles.heroMetaDivider} />
+            <View style={styles.heroMetaItem}>
+              <Text style={styles.heroMetaLabel}>Available</Text>
+              <Text style={[styles.heroMetaValue, availableSeats <= 2 && { color: '#f59e0b' }]}>
+                {availableSeats} seat{availableSeats !== 1 ? 's' : ''}
+              </Text>
+            </View>
+          </View>
+
           <View style={styles.driverRow}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>{trip.driver_first?.[0]}{trip.driver_last?.[0]}</Text>
             </View>
-            <View>
+            <View style={{ flex: 1 }}>
               <Text style={styles.driverName}>{trip.driver_first} {trip.driver_last}</Text>
-              <Text style={styles.driverMeta}>⭐ {Number(trip.driver_rating || 0).toFixed(1)} · {trip.vehicle_make} {trip.vehicle_model} ({trip.vehicle_color})</Text>
+              <Text style={styles.driverMeta}>
+                ⭐ {Number(trip.driver_rating || 0).toFixed(1)} · {trip.vehicle_make} {trip.vehicle_model}
+                {trip.vehicle_color ? ` · ${trip.vehicle_color}` : ''}
+              </Text>
             </View>
           </View>
         </View>
 
-        {/* Seats selector */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Number of Seats</Text>
+        {/* Seats */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>How many seats?</Text>
           <View style={styles.seatRow}>
             <TouchableOpacity
-              style={styles.seatBtn}
+              style={[styles.seatBtn, seats <= 1 && styles.seatBtnDisabled]}
               onPress={() => setSeats(s => Math.max(1, s - 1))}
+              disabled={seats <= 1}
             >
               <Text style={styles.seatBtnText}>−</Text>
             </TouchableOpacity>
-            <Text style={styles.seatCount}>{seats}</Text>
+            <View style={styles.seatCountBox}>
+              <Text style={styles.seatCount}>{seats}</Text>
+              <Text style={styles.seatLabel}>{seats === 1 ? 'seat' : 'seats'}</Text>
+            </View>
             <TouchableOpacity
-              style={styles.seatBtn}
-              onPress={() => setSeats(s => Math.min(trip.available_seats, s + 1))}
+              style={[styles.seatBtn, seats >= availableSeats && styles.seatBtnDisabled]}
+              onPress={() => setSeats(s => Math.min(availableSeats, s + 1))}
+              disabled={seats >= availableSeats}
             >
               <Text style={styles.seatBtnText}>+</Text>
             </TouchableOpacity>
-            <Text style={styles.seatAvail}>{trip.available_seats} available</Text>
+            <Text style={styles.pricePerSeat}>R{pricePerSeat.toFixed(0)} / seat</Text>
           </View>
         </View>
 
-        {/* Addresses */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Pickup & Drop-off</Text>
-          <View style={styles.field}>
-            <Text style={styles.label}>Pickup address *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. 10 Main St, Johannesburg"
-              placeholderTextColor={COLORS.textMuted}
-              value={pickup}
-              onChangeText={setPickup}
-              multiline
-            />
+        {/* Pickup & drop-off */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Pickup & drop-off</Text>
+          <View style={styles.addressBlock}>
+            <View style={styles.addressRow}>
+              <View style={styles.addressDotGreen} />
+              <TextInput
+                style={styles.addressInput}
+                placeholder="Pickup address *"
+                placeholderTextColor={COLORS.textMuted}
+                value={pickup}
+                onChangeText={setPickup}
+                multiline
+              />
+            </View>
+            <View style={styles.addressConnector} />
+            <View style={styles.addressRow}>
+              <View style={styles.addressDotNavy} />
+              <TextInput
+                style={styles.addressInput}
+                placeholder="Drop-off (optional)"
+                placeholderTextColor={COLORS.textMuted}
+                value={dropoff}
+                onChangeText={setDropoff}
+                multiline
+              />
+            </View>
           </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Drop-off address (optional)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. Polokwane CBD"
-              placeholderTextColor={COLORS.textMuted}
-              value={dropoff}
-              onChangeText={setDropoff}
-              multiline
-            />
+          <Text style={styles.addressHint}>
+            Your driver will confirm exact pickup once booked.
+          </Text>
+        </View>
+
+        {/* What happens next */}
+        <View style={styles.stepsCard}>
+          <Text style={styles.stepsTitle}>What happens next</Text>
+          <View style={styles.step}>
+            <View style={styles.stepNum}><Text style={styles.stepNumText}>1</Text></View>
+            <Text style={styles.stepText}>Pay securely via PayFast — your seat is held for 30 min</Text>
+          </View>
+          <View style={styles.step}>
+            <View style={styles.stepNum}><Text style={styles.stepNumText}>2</Text></View>
+            <Text style={styles.stepText}>Get a booking code to show your driver at pickup</Text>
+          </View>
+          <View style={styles.step}>
+            <View style={styles.stepNum}><Text style={styles.stepNumText}>3</Text></View>
+            <Text style={styles.stepText}>Track your driver live on the day of travel</Text>
           </View>
         </View>
 
-        {/* Price summary */}
-        <View style={styles.priceSummary}>
-          <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>R{Number(trip.price_per_seat).toFixed(2)} × {seats} seat{seats !== 1 ? 's' : ''}</Text>
-            <Text style={styles.priceValue}>R{total}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.priceRow}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>R{total}</Text>
-          </View>
-        </View>
+        {/* Spacer for sticky footer */}
+        <View style={{ height: 120 }} />
+      </ScrollView>
 
-        {/* Book button */}
+      {/* Sticky pay bar */}
+      <View style={styles.payBar}>
+        <View style={styles.payBarLeft}>
+          <Text style={styles.payBarLabel}>{seats} seat{seats !== 1 ? 's' : ''}</Text>
+          <Text style={styles.payBarTotal}>R{total}</Text>
+        </View>
         <TouchableOpacity
-          style={[styles.bookBtn, (booking || paying) && { opacity: 0.7 }]}
+          style={[styles.payBtn, (booking || paying) && styles.payBtnBusy]}
           onPress={handleBook}
           disabled={booking || paying}
+          activeOpacity={0.85}
         >
-          {booking || paying
-            ? <ActivityIndicator color="white" />
-            : <Text style={styles.bookBtnText}>
-                {paying ? 'Opening payment...' : `Pay R${total} with PayFast`}
-              </Text>
-          }
+          {booking || paying ? (
+            <ActivityIndicator color={COLORS.navy} />
+          ) : (
+            <Text style={styles.payBtnText}>Pay with PayFast →</Text>
+          )}
         </TouchableOpacity>
-
-        <Text style={styles.disclaimer}>
-          Your seat is held for 30 minutes after booking. Complete payment to confirm.
-        </Text>
-      </ScrollView>
+      </View>
     </SafeAreaView>
   )
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: COLORS.offWhite },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.offWhite },
-  scroll: { padding: 20, gap: 20, paddingBottom: 40 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingTop: Platform.OS === 'android' ? 28 : 0 },
-  back: { padding: 4 },
-  backText: { fontSize: 15, color: COLORS.navy, fontWeight: '600' },
-  headerTitle: { fontSize: 18, fontWeight: '800', color: COLORS.navy },
-  tripCard: {
-    backgroundColor: COLORS.navy, borderRadius: 16, padding: 20, gap: 8,
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, backgroundColor: COLORS.offWhite },
+  loadingText: { fontSize: 14, color: COLORS.textSecondary },
+
+  topBar: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 14,
+    paddingTop: Platform.OS === 'android' ? 44 : 14,
+    backgroundColor: COLORS.white,
+    borderBottomWidth: 1, borderBottomColor: COLORS.border,
   },
-  route: { fontSize: 18, fontWeight: '800', color: COLORS.white },
-  tripMeta: { fontSize: 13, color: 'rgba(255,255,255,0.7)' },
-  driverRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
-  avatar: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center',
+  backBtn: { width: 36, height: 36, justifyContent: 'center' },
+  backArrow: { fontSize: 22, color: COLORS.navy, fontWeight: '600' },
+  topTitle: { fontSize: 16, fontWeight: '800', color: COLORS.navy },
+
+  scroll: { padding: 16, gap: 14 },
+
+  // Hero card
+  heroCard: {
+    backgroundColor: COLORS.navy, borderRadius: 20, padding: 20, gap: 16,
   },
+  heroRoute: { flexDirection: 'row', alignItems: 'center', gap: 0 },
+  heroCity: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  heroCityText: { fontSize: 16, fontWeight: '800', color: COLORS.white },
+  heroLine: { flex: 0, width: 20, height: 2, backgroundColor: 'rgba(255,255,255,0.3)', marginHorizontal: 4 },
+  dotGreen: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#34d399' },
+  dotNavy: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.gold },
+
+  heroMeta: { flexDirection: 'row', alignItems: 'center' },
+  heroMetaItem: { flex: 1, alignItems: 'center' },
+  heroMetaLabel: { fontSize: 11, color: 'rgba(255,255,255,0.55)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 },
+  heroMetaValue: { fontSize: 15, fontWeight: '700', color: COLORS.white },
+  heroMetaDivider: { width: 1, height: 32, backgroundColor: 'rgba(255,255,255,0.15)' },
+
+  driverRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 4, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)' },
+  avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 14, fontWeight: '700', color: COLORS.navy },
-  driverName: { fontSize: 14, fontWeight: '600', color: COLORS.white },
+  driverName: { fontSize: 14, fontWeight: '700', color: COLORS.white },
   driverMeta: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 1 },
-  section: { backgroundColor: COLORS.white, borderRadius: 14, padding: 18, gap: 14 },
-  sectionTitle: { fontSize: 14, fontWeight: '700', color: COLORS.navy },
-  seatRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+
+  // Shared card
+  card: { backgroundColor: COLORS.white, borderRadius: 16, padding: 18 },
+  cardTitle: { fontSize: 14, fontWeight: '700', color: COLORS.navy, marginBottom: 14 },
+
+  // Seats
+  seatRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   seatBtn: {
-    width: 40, height: 40, borderRadius: 20,
+    width: 44, height: 44, borderRadius: 22,
     backgroundColor: COLORS.navy, alignItems: 'center', justifyContent: 'center',
   },
-  seatBtnText: { fontSize: 20, color: 'white', fontWeight: '700', lineHeight: 24 },
-  seatCount: { fontSize: 24, fontWeight: '800', color: COLORS.navy, minWidth: 32, textAlign: 'center' },
-  seatAvail: { fontSize: 13, color: COLORS.textMuted },
-  field: { gap: 6 },
-  label: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
-  input: {
-    borderWidth: 1, borderColor: COLORS.border, borderRadius: 10,
-    padding: 14, fontSize: 14, color: COLORS.text, backgroundColor: COLORS.offWhite,
-    minHeight: 48,
+  seatBtnDisabled: { backgroundColor: COLORS.border },
+  seatBtnText: { fontSize: 22, color: 'white', fontWeight: '700', lineHeight: 26 },
+  seatCountBox: { width: 52, alignItems: 'center' },
+  seatCount: { fontSize: 28, fontWeight: '900', color: COLORS.navy },
+  seatLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: -2 },
+  pricePerSeat: { fontSize: 13, color: COLORS.textSecondary, marginLeft: 'auto' as any },
+
+  // Address
+  addressBlock: {
+    borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, overflow: 'hidden',
   },
-  priceSummary: { backgroundColor: COLORS.white, borderRadius: 14, padding: 18, gap: 10 },
-  priceRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  priceLabel: { fontSize: 14, color: COLORS.textSecondary },
-  priceValue: { fontSize: 14, color: COLORS.text, fontWeight: '600' },
-  divider: { height: 1, backgroundColor: COLORS.border },
-  totalLabel: { fontSize: 15, fontWeight: '700', color: COLORS.navy },
-  totalValue: { fontSize: 18, fontWeight: '800', color: COLORS.navy },
-  bookBtn: {
-    backgroundColor: COLORS.navy, borderRadius: 14,
-    padding: 18, alignItems: 'center',
+  addressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14 },
+  addressConnector: { height: 1, backgroundColor: COLORS.border, marginLeft: 40 },
+  addressDotGreen: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#34d399', marginTop: 5 },
+  addressDotNavy: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.navy, marginTop: 5 },
+  addressInput: { flex: 1, fontSize: 14, color: COLORS.text, minHeight: 40, paddingTop: 0 },
+  addressHint: { fontSize: 12, color: COLORS.textMuted, marginTop: 10, lineHeight: 18 },
+
+  // Steps
+  stepsCard: {
+    backgroundColor: COLORS.white, borderRadius: 16, padding: 18, gap: 14,
   },
-  bookBtnText: { color: 'white', fontWeight: '700', fontSize: 16 },
-  disclaimer: { fontSize: 12, color: COLORS.textMuted, textAlign: 'center', lineHeight: 18 },
+  stepsTitle: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
+  step: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
+  stepNum: {
+    width: 24, height: 24, borderRadius: 12,
+    backgroundColor: COLORS.navy, alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  stepNumText: { fontSize: 12, fontWeight: '700', color: COLORS.gold },
+  stepText: { flex: 1, fontSize: 13, color: COLORS.textSecondary, lineHeight: 20, paddingTop: 2 },
+
+  // Sticky pay bar
+  payBar: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: COLORS.white,
+    borderTopWidth: 1, borderTopColor: COLORS.border,
+    flexDirection: 'row', alignItems: 'center', gap: 16,
+    paddingHorizontal: 20, paddingTop: 14,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 18,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08, shadowRadius: 12, elevation: 16,
+  },
+  payBarLeft: { flex: 1 },
+  payBarLabel: { fontSize: 12, color: COLORS.textMuted },
+  payBarTotal: { fontSize: 24, fontWeight: '900', color: COLORS.navy },
+  payBtn: {
+    backgroundColor: COLORS.gold, borderRadius: 14,
+    paddingVertical: 16, paddingHorizontal: 24,
+    alignItems: 'center', justifyContent: 'center', minWidth: 160,
+  },
+  payBtnBusy: { opacity: 0.7 },
+  payBtnText: { color: COLORS.navy, fontWeight: '800', fontSize: 15 },
 })
