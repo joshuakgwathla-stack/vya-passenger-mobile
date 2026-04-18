@@ -1,15 +1,242 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
-  TouchableOpacity, TextInput, Alert, ActivityIndicator, Platform,
+  TouchableOpacity, TextInput, Alert, ActivityIndicator,
+  Platform, FlatList, Keyboard,
 } from 'react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
 import * as Location from 'expo-location'
+import axios from 'axios'
 import { tripsApi, bookingsApi, paymentsApi } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { COLORS } from '../../constants'
 
+const PLACES_KEY = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY || ''
+
+// Autocomplete suggestions from Google Places
+async function fetchSuggestions(input: string): Promise<any[]> {
+  if (input.length < 3) return []
+  try {
+    const { data } = await axios.get(
+      'https://maps.googleapis.com/maps/api/place/autocomplete/json',
+      {
+        params: {
+          input,
+          key: PLACES_KEY,
+          components: 'country:za',       // South Africa only
+          types: 'geocode|establishment',  // addresses + named places
+          language: 'en',
+        },
+      }
+    )
+    return data.predictions || []
+  } catch {
+    return []
+  }
+}
+
+// Get full formatted address for a place_id
+async function fetchPlaceDetail(placeId: string): Promise<string> {
+  try {
+    const { data } = await axios.get(
+      'https://maps.googleapis.com/maps/api/place/details/json',
+      {
+        params: {
+          place_id: placeId,
+          key: PLACES_KEY,
+          fields: 'formatted_address',
+        },
+      }
+    )
+    return data.result?.formatted_address || ''
+  } catch {
+    return ''
+  }
+}
+
+// ------------------------------------------------------------------
+// AddressInput — GPS auto-detect + Google Places autocomplete dropdown
+// ------------------------------------------------------------------
+function AddressInput({
+  value,
+  onChange,
+  placeholder,
+  autoDetect = false,
+  dotColor,
+}: {
+  value: string
+  onChange: (v: string) => void
+  placeholder: string
+  autoDetect?: boolean
+  dotColor: string
+}) {
+  const [inputText, setInputText] = useState(value)
+  const [suggestions, setSuggestions] = useState<any[]>([])
+  const [showDropdown, setShowDropdown] = useState(false)
+  const [detecting, setDetecting] = useState(false)
+  const [detected, setDetected] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Auto-detect GPS on mount (pickup only)
+  useEffect(() => {
+    if (!autoDetect) return
+    detectGPS()
+  }, [])
+
+  // Keep inputText in sync when value changes externally
+  useEffect(() => {
+    setInputText(value)
+  }, [value])
+
+  const detectGPS = async () => {
+    setDetecting(true)
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync()
+      if (status !== 'granted') { setDetecting(false); return }
+
+      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+
+      // Try Google reverse geocode first (more precise than expo-location's)
+      try {
+        const { data } = await axios.get(
+          'https://maps.googleapis.com/maps/api/geocode/json',
+          {
+            params: {
+              latlng: `${pos.coords.latitude},${pos.coords.longitude}`,
+              key: PLACES_KEY,
+              result_type: 'street_address|subpremise|premise',
+              language: 'en',
+            },
+          }
+        )
+        const addr = data.results?.[0]?.formatted_address
+        if (addr) {
+          // Strip country suffix — "22 Rivonia Rd, Sandton, 2196, South Africa" → "22 Rivonia Rd, Sandton, 2196"
+          const clean = addr.replace(/, South Africa$/, '')
+          setInputText(clean)
+          onChange(clean)
+          setDetected(true)
+          setDetecting(false)
+          return
+        }
+      } catch {}
+
+      // Fallback to expo-location reverse geocode
+      const [place] = await Location.reverseGeocodeAsync({
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+      })
+      if (place) {
+        const parts = [
+          place.streetNumber && place.street ? `${place.streetNumber} ${place.street}` : place.street,
+          place.district || place.subregion || place.city,
+          place.region,
+        ].filter(Boolean)
+        const label = parts.join(', ')
+        setInputText(label)
+        onChange(label)
+        setDetected(true)
+      }
+    } catch {}
+    finally { setDetecting(false) }
+  }
+
+  const handleChangeText = (text: string) => {
+    setInputText(text)
+    onChange(text)
+    setDetected(false)
+
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (text.length < 3) { setSuggestions([]); setShowDropdown(false); return }
+
+    debounceRef.current = setTimeout(async () => {
+      const results = await fetchSuggestions(text)
+      setSuggestions(results)
+      setShowDropdown(results.length > 0)
+    }, 350)
+  }
+
+  const handleSelect = async (prediction: any) => {
+    Keyboard.dismiss()
+    setShowDropdown(false)
+    setSuggestions([])
+    // Show the main_text immediately, then resolve full address
+    const quick = prediction.description
+    setInputText(quick)
+    onChange(quick)
+    // Fetch precise formatted address
+    const full = await fetchPlaceDetail(prediction.place_id)
+    if (full) {
+      const clean = full.replace(/, South Africa$/, '')
+      setInputText(clean)
+      onChange(clean)
+    }
+  }
+
+  return (
+    <View>
+      <View style={styles.addressRow}>
+        <View style={[styles.addressDot, { backgroundColor: dotColor }]} />
+        <View style={{ flex: 1 }}>
+          {detecting ? (
+            <View style={styles.detectingRow}>
+              <ActivityIndicator color={COLORS.navy} size="small" />
+              <Text style={styles.detectingText}>Detecting your location…</Text>
+            </View>
+          ) : (
+            <View style={styles.inputWrapper}>
+              <TextInput
+                style={[styles.addressInput, detected && styles.addressInputDetected]}
+                placeholder={placeholder}
+                placeholderTextColor={COLORS.textMuted}
+                value={inputText}
+                onChangeText={handleChangeText}
+                onFocus={() => { if (suggestions.length > 0) setShowDropdown(true) }}
+                onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+                multiline={false}
+                returnKeyType="done"
+              />
+              {detected && (
+                <View style={styles.gpsTag}>
+                  <Text style={styles.gpsTagText}>📍 GPS</Text>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+      </View>
+
+      {/* Autocomplete dropdown */}
+      {showDropdown && suggestions.length > 0 && (
+        <View style={styles.dropdown}>
+          {suggestions.slice(0, 5).map((p, i) => (
+            <TouchableOpacity
+              key={p.place_id}
+              style={[styles.dropdownItem, i < suggestions.length - 1 && styles.dropdownItemBorder]}
+              onPress={() => handleSelect(p)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.dropdownIcon}>📍</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.dropdownMain} numberOfLines={1}>
+                  {p.structured_formatting?.main_text || p.description}
+                </Text>
+                <Text style={styles.dropdownSub} numberOfLines={1}>
+                  {p.structured_formatting?.secondary_text || ''}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  )
+}
+
+// ------------------------------------------------------------------
+// Main Booking Screen
+// ------------------------------------------------------------------
 export default function BookingScreen() {
   const { tripId } = useLocalSearchParams<{ tripId: string }>()
   const { user } = useAuth()
@@ -18,69 +245,17 @@ export default function BookingScreen() {
   const [trip, setTrip] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [seats, setSeats] = useState(1)
+  const [pickup, setPickup] = useState('')
   const [dropoff, setDropoff] = useState('')
   const [booking, setBooking] = useState(false)
   const [paying, setPaying] = useState(false)
-
-  // Location state
-  const [locationLoading, setLocationLoading] = useState(true)
-  const [locationDenied, setLocationDenied] = useState(false)
-  const [detectedLocation, setDetectedLocation] = useState<string>('')  // e.g. "Sandton, Gauteng"
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null)
-  const [pickupOverride, setPickupOverride] = useState<string>('')      // if user manually edits
-  const [editingPickup, setEditingPickup] = useState(false)
 
   useEffect(() => {
     tripsApi.getTrip(tripId)
       .then(({ data }) => setTrip(data.data))
       .catch(() => Alert.alert('Error', 'Could not load trip details'))
       .finally(() => setLoading(false))
-
-    detectLocation()
   }, [tripId])
-
-  const detectLocation = async () => {
-    setLocationLoading(true)
-    setLocationDenied(false)
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync()
-      if (status !== 'granted') {
-        setLocationDenied(true)
-        setLocationLoading(false)
-        return
-      }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
-      setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-
-      const [place] = await Location.reverseGeocodeAsync({
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
-      })
-
-      if (place) {
-        // Build a human-readable pickup label: suburb/city + province
-        const suburb = place.district || place.subregion || place.city || ''
-        const city = place.city || place.subregion || ''
-        const province = place.region || ''
-        // Use suburb if available and different from city, otherwise just city + province
-        let label = ''
-        if (suburb && suburb !== city) {
-          label = `${suburb}, ${city || province}`
-        } else if (city) {
-          label = province ? `${city}, ${province}` : city
-        } else {
-          label = province
-        }
-        setDetectedLocation(label)
-      } else {
-        setDetectedLocation('')
-      }
-    } catch {
-      setDetectedLocation('')
-    } finally {
-      setLocationLoading(false)
-    }
-  }
 
   if (loading) {
     return (
@@ -98,19 +273,9 @@ export default function BookingScreen() {
   const total = (pricePerSeat * seats).toFixed(2)
   const availableSeats = trip.available_seats ?? 0
 
-  // The address actually sent to the API
-  const effectivePickup = editingPickup
-    ? pickupOverride
-    : (detectedLocation || pickupOverride)
-
   const handleBook = async () => {
-    if (!effectivePickup.trim()) {
-      Alert.alert(
-        'Pickup required',
-        locationDenied
-          ? 'Please type your pickup address, or enable location permission in Settings.'
-          : 'We couldn\'t detect your location. Please type your pickup address.'
-      )
+    if (!pickup.trim()) {
+      Alert.alert('Pickup required', 'Enter your pickup address so your driver can find you.')
       return
     }
     setBooking(true)
@@ -118,7 +283,7 @@ export default function BookingScreen() {
       const { data } = await bookingsApi.create({
         trip_id: tripId,
         seats_booked: seats,
-        pickup_address: effectivePickup,
+        pickup_address: pickup,
         dropoff_address: dropoff,
         passengers: [{
           name: `${user?.first_name} ${user?.last_name}`,
@@ -165,7 +330,6 @@ export default function BookingScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      {/* Top bar */}
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backArrow}>←</Text>
@@ -179,7 +343,7 @@ export default function BookingScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* Trip hero card */}
+        {/* Trip hero */}
         <View style={styles.heroCard}>
           <View style={styles.heroRoute}>
             <View style={styles.heroCity}>
@@ -192,7 +356,6 @@ export default function BookingScreen() {
               <Text style={styles.heroCityText}>{trip.destination_city}</Text>
             </View>
           </View>
-
           <View style={styles.heroMeta}>
             <View style={styles.heroMetaItem}>
               <Text style={styles.heroMetaLabel}>Date</Text>
@@ -213,7 +376,6 @@ export default function BookingScreen() {
               </Text>
             </View>
           </View>
-
           <View style={styles.driverRow}>
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>{trip.driver_first?.[0]}{trip.driver_last?.[0]}</Text>
@@ -256,110 +418,29 @@ export default function BookingScreen() {
 
         {/* Pickup & drop-off */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Pickup & drop-off</Text>
+          <Text style={styles.cardTitle}>Where should your driver find you?</Text>
+          <Text style={styles.cardSubtitle}>Your driver comes to your door — no taxi rank needed.</Text>
 
           <View style={styles.addressBlock}>
-            {/* ── Pickup row (GPS auto-detect) ── */}
-            <View style={styles.addressRow}>
-              <View style={styles.addressDotGreen} />
-              <View style={styles.pickupContent}>
-                {locationLoading ? (
-                  <View style={styles.detectingRow}>
-                    <ActivityIndicator color={COLORS.navy} size="small" />
-                    <Text style={styles.detectingText}>Detecting your location…</Text>
-                  </View>
-                ) : locationDenied ? (
-                  // Permission denied — show manual input
-                  <View style={{ flex: 1 }}>
-                    <TextInput
-                      style={styles.addressInput}
-                      placeholder="Your pickup address *"
-                      placeholderTextColor={COLORS.textMuted}
-                      value={pickupOverride}
-                      onChangeText={setPickupOverride}
-                      multiline
-                      autoFocus
-                    />
-                    <TouchableOpacity onPress={detectLocation} style={styles.retryBtn}>
-                      <Text style={styles.retryText}>📍 Retry location</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : editingPickup ? (
-                  // Manual edit mode
-                  <View style={{ flex: 1 }}>
-                    <TextInput
-                      style={styles.addressInput}
-                      placeholder="e.g. 10 Rivonia Rd, Sandton"
-                      placeholderTextColor={COLORS.textMuted}
-                      value={pickupOverride}
-                      onChangeText={setPickupOverride}
-                      multiline
-                      autoFocus
-                    />
-                    {detectedLocation ? (
-                      <TouchableOpacity
-                        onPress={() => { setEditingPickup(false); setPickupOverride('') }}
-                        style={styles.retryBtn}
-                      >
-                        <Text style={styles.retryText}>↩ Use detected location</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                ) : detectedLocation ? (
-                  // GPS detected — show as a locked pill with edit option
-                  <View style={styles.detectedRow}>
-                    <View style={styles.detectedPill}>
-                      <Text style={styles.detectedIcon}>📍</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.detectedLabel}>Detected location</Text>
-                        <Text style={styles.detectedValue}>{detectedLocation}</Text>
-                      </View>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => { setEditingPickup(true); setPickupOverride(detectedLocation) }}
-                      style={styles.editBtn}
-                    >
-                      <Text style={styles.editBtnText}>Edit</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  // GPS returned no result — fall back to manual
-                  <View style={{ flex: 1 }}>
-                    <TextInput
-                      style={styles.addressInput}
-                      placeholder="Your pickup address *"
-                      placeholderTextColor={COLORS.textMuted}
-                      value={pickupOverride}
-                      onChangeText={setPickupOverride}
-                      multiline
-                    />
-                    <TouchableOpacity onPress={detectLocation} style={styles.retryBtn}>
-                      <Text style={styles.retryText}>📍 Try detecting again</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            </View>
+            {/* Pickup — GPS auto-detect + autocomplete */}
+            <AddressInput
+              value={pickup}
+              onChange={setPickup}
+              placeholder="Your pickup address *"
+              autoDetect
+              dotColor="#34d399"
+            />
 
             <View style={styles.addressConnector} />
 
-            {/* ── Drop-off row (always manual) ── */}
-            <View style={styles.addressRow}>
-              <View style={styles.addressDotNavy} />
-              <TextInput
-                style={styles.addressInput}
-                placeholder={`Drop-off in ${trip.destination_city} (optional)`}
-                placeholderTextColor={COLORS.textMuted}
-                value={dropoff}
-                onChangeText={setDropoff}
-                multiline
-              />
-            </View>
+            {/* Drop-off — autocomplete only */}
+            <AddressInput
+              value={dropoff}
+              onChange={setDropoff}
+              placeholder={`Drop-off in ${trip.destination_city} (optional)`}
+              dotColor={COLORS.navy}
+            />
           </View>
-
-          <Text style={styles.addressHint}>
-            Your driver uses your pickup location to find you. The more specific, the better.
-          </Text>
         </View>
 
         {/* What happens next */}
@@ -389,16 +470,15 @@ export default function BookingScreen() {
           <Text style={styles.payBarTotal}>R{total}</Text>
         </View>
         <TouchableOpacity
-          style={[styles.payBtn, (booking || paying || locationLoading) && styles.payBtnBusy]}
+          style={[styles.payBtn, (booking || paying) && styles.payBtnBusy]}
           onPress={handleBook}
-          disabled={booking || paying || locationLoading}
+          disabled={booking || paying}
           activeOpacity={0.85}
         >
-          {booking || paying ? (
-            <ActivityIndicator color={COLORS.navy} />
-          ) : (
-            <Text style={styles.payBtnText}>Pay with PayFast →</Text>
-          )}
+          {booking || paying
+            ? <ActivityIndicator color={COLORS.navy} />
+            : <Text style={styles.payBtnText}>Pay with PayFast →</Text>
+          }
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -443,10 +523,11 @@ const styles = StyleSheet.create({
   driverName: { fontSize: 14, fontWeight: '700', color: COLORS.white },
   driverMeta: { fontSize: 12, color: 'rgba(255,255,255,0.6)', marginTop: 1 },
 
-  card: { backgroundColor: COLORS.white, borderRadius: 16, padding: 18 },
-  cardTitle: { fontSize: 14, fontWeight: '700', color: COLORS.navy, marginBottom: 14 },
+  card: { backgroundColor: COLORS.white, borderRadius: 16, padding: 18, gap: 10 },
+  cardTitle: { fontSize: 14, fontWeight: '700', color: COLORS.navy },
+  cardSubtitle: { fontSize: 12, color: COLORS.textMuted, marginTop: -4 },
 
-  seatRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  seatRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 4 },
   seatBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.navy, alignItems: 'center', justifyContent: 'center' },
   seatBtnDisabled: { backgroundColor: COLORS.border },
   seatBtnText: { fontSize: 22, color: 'white', fontWeight: '700', lineHeight: 26 },
@@ -455,36 +536,40 @@ const styles = StyleSheet.create({
   seatLabel: { fontSize: 11, color: COLORS.textMuted, marginTop: -2 },
   pricePerSeat: { fontSize: 13, color: COLORS.textSecondary, marginLeft: 'auto' as any },
 
-  addressBlock: { borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, overflow: 'hidden' },
+  // Address block
+  addressBlock: {
+    borderWidth: 1, borderColor: COLORS.border, borderRadius: 12, overflow: 'visible',
+  },
   addressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14 },
   addressConnector: { height: 1, backgroundColor: COLORS.border, marginLeft: 40 },
-  addressDotGreen: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#34d399', marginTop: 8 },
-  addressDotNavy: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.navy, marginTop: 8 },
-  addressInput: { flex: 1, fontSize: 14, color: COLORS.text, minHeight: 40, paddingTop: 4 },
-  addressHint: { fontSize: 12, color: COLORS.textMuted, marginTop: 10, lineHeight: 18 },
-
-  // Pickup-specific
-  pickupContent: { flex: 1 },
+  addressDot: { width: 10, height: 10, borderRadius: 5, marginTop: 14, flexShrink: 0 },
+  inputWrapper: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  addressInput: { flex: 1, fontSize: 14, color: COLORS.text, paddingVertical: 8 },
+  addressInputDetected: { color: COLORS.navy, fontWeight: '600' },
+  gpsTag: {
+    backgroundColor: '#ecfdf5', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4,
+  },
+  gpsTagText: { fontSize: 10, fontWeight: '700', color: '#059669' },
   detectingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
   detectingText: { fontSize: 14, color: COLORS.textSecondary },
 
-  detectedRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  detectedPill: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: COLORS.offWhite, borderRadius: 10, padding: 10,
+  // Dropdown
+  dropdown: {
+    marginHorizontal: 14, marginTop: 2,
+    backgroundColor: COLORS.white, borderRadius: 12,
+    borderWidth: 1, borderColor: COLORS.border,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1, shadowRadius: 12, elevation: 8,
+    zIndex: 999,
   },
-  detectedIcon: { fontSize: 16 },
-  detectedLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.3 },
-  detectedValue: { fontSize: 14, fontWeight: '700', color: COLORS.navy, marginTop: 1 },
-
-  editBtn: {
-    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
-    backgroundColor: COLORS.navy,
+  dropdownItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 14, paddingVertical: 13,
   },
-  editBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.white },
-
-  retryBtn: { marginTop: 6 },
-  retryText: { fontSize: 12, color: COLORS.navy, fontWeight: '600' },
+  dropdownItemBorder: { borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  dropdownIcon: { fontSize: 14 },
+  dropdownMain: { fontSize: 14, fontWeight: '600', color: COLORS.navy },
+  dropdownSub: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
 
   stepsCard: { backgroundColor: COLORS.white, borderRadius: 16, padding: 18, gap: 14 },
   stepsTitle: { fontSize: 13, fontWeight: '700', color: COLORS.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 },
