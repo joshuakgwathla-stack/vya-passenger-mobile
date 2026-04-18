@@ -70,6 +70,10 @@ export const routesApi = {
   getCities: () => api.get('/routes/cities'),
 }
 
+export const pickupPointsApi = {
+  getByCity: (city: string) => api.get('/pickup-points', { params: { city } }),
+}
+
 export const usersApi = {
   updateProfile: (data: FormData) =>
     api.patch('/users/profile', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
