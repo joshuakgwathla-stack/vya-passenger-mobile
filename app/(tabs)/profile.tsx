@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   View, Text, TouchableOpacity, StyleSheet, SafeAreaView,
   Platform, ScrollView, TextInput, Alert, ActivityIndicator,
@@ -6,6 +6,7 @@ import {
 import { useAuth } from '../../lib/auth'
 import { usersApi } from '../../lib/api'
 import { COLORS } from '../../constants'
+import { getSavedAddress, setSavedAddress, clearSavedAddress } from '../../lib/savedAddress'
 
 export default function ProfileScreen() {
   const { user, logout, refresh } = useAuth()
@@ -17,6 +18,12 @@ export default function ProfileScreen() {
   })
   const [passForm, setPassForm] = useState({ current_password: '', new_password: '', confirm: '' })
   const [saving, setSaving] = useState(false)
+  const [homeAddress, setHomeAddress] = useState('')
+  const [savingAddress, setSavingAddress] = useState(false)
+
+  useEffect(() => {
+    getSavedAddress().then(a => { if (a) setHomeAddress(a) })
+  }, [])
 
   const set = (k: string) => (v: string) => setForm(f => ({ ...f, [k]: v }))
   const setPass = (k: string) => (v: string) => setPassForm(f => ({ ...f, [k]: v }))
@@ -58,6 +65,27 @@ export default function ProfileScreen() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleSaveAddress = async () => {
+    if (!homeAddress.trim()) {
+      Alert.alert('Empty address', 'Enter an address or tap Clear to remove the saved one.')
+      return
+    }
+    setSavingAddress(true)
+    await setSavedAddress(homeAddress.trim())
+    setSavingAddress(false)
+    Alert.alert('Saved', 'Your pickup address has been saved. It will be pre-filled on your next booking.')
+  }
+
+  const handleClearAddress = () => {
+    Alert.alert('Clear address', 'Remove your saved pickup address?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', style: 'destructive', onPress: async () => {
+        await clearSavedAddress()
+        setHomeAddress('')
+      }},
+    ])
   }
 
   const handleLogout = () => {
@@ -120,7 +148,37 @@ export default function ProfileScreen() {
                 {saving ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Save Changes</Text>}
               </TouchableOpacity>
             </View>
-          ) : (
+
+          ) : null}
+
+          {tab === 'info' && (
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>🏠 Saved Pickup Address</Text>
+              <Text style={styles.sectionHint}>Pre-filled on every booking — no need to type your address each time</Text>
+              <View style={styles.field}>
+                <Text style={styles.label}>Your home / pickup address</Text>
+                <TextInput
+                  style={styles.input}
+                  value={homeAddress}
+                  onChangeText={setHomeAddress}
+                  placeholder="e.g. 12 Main Street, Sandton"
+                  placeholderTextColor={COLORS.textMuted}
+                  autoCapitalize="words"
+                  multiline
+                />
+              </View>
+              <TouchableOpacity style={styles.btn} onPress={handleSaveAddress} disabled={savingAddress}>
+                {savingAddress ? <ActivityIndicator color="white" /> : <Text style={styles.btnText}>Save Address</Text>}
+              </TouchableOpacity>
+              {homeAddress.length > 0 && (
+                <TouchableOpacity onPress={handleClearAddress}>
+                  <Text style={styles.clearText}>Clear saved address</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
+          {tab === 'password' && (
             <View style={styles.card}>
               {[
                 { k: 'current_password', label: 'Current Password' },
@@ -199,4 +257,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#fca5a5',
   },
   logoutText: { color: COLORS.danger, fontWeight: '700', fontSize: 15 },
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: COLORS.navy },
+  sectionHint: { fontSize: 12, color: COLORS.textMuted, marginTop: -8, lineHeight: 17 },
+  clearText: { fontSize: 13, color: COLORS.danger, fontWeight: '600', textAlign: 'center', paddingTop: 4 },
 })

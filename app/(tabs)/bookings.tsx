@@ -14,6 +14,10 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; label: string }>
   cancelled: { bg: '#fef2f2', text: '#dc2626', label: 'Cancelled' },
 }
 
+const PAYMENT_STATUS_CONFIG: Record<string, { bg: string; text: string; label: string } | undefined> = {
+  eft_pending: { bg: '#fff7ed', text: '#c2410c', label: 'EFT under review' },
+}
+
 const TABS = [
   { key: 'upcoming', label: 'Upcoming' },
   { key: 'completed', label: 'Done' },
@@ -24,7 +28,9 @@ function BoardingPass({ b, onPress }: { b: any; onPress: () => void }) {
   const dep = new Date(b.departure_time)
   const sc = STATUS_CONFIG[b.status] || { bg: '#f1f5f9', text: '#64748b', label: b.status }
   const isUnpaid = b.payment_status === 'unpaid' && b.status !== 'cancelled'
+  const isEftPending = b.payment_status === 'eft_pending'
   const isCompleted = b.status === 'completed'
+  const paymentBadge = PAYMENT_STATUS_CONFIG[b.payment_status]
 
   const todayMs = new Date().setHours(0, 0, 0, 0)
   const depMs = new Date(dep).setHours(0, 0, 0, 0)
@@ -43,6 +49,11 @@ function BoardingPass({ b, onPress }: { b: any; onPress: () => void }) {
       {isUnpaid && (
         <View style={styles.urgentBanner}>
           <Text style={styles.urgentText}>⚠️  Complete payment to confirm your seat</Text>
+        </View>
+      )}
+      {isEftPending && (
+        <View style={styles.eftBanner}>
+          <Text style={styles.eftBannerText}>🕐  EFT proof submitted — awaiting verification</Text>
         </View>
       )}
 
@@ -91,13 +102,18 @@ function BoardingPass({ b, onPress }: { b: any; onPress: () => void }) {
         <View style={[styles.statusBadge, { backgroundColor: sc.bg }]}>
           <Text style={[styles.statusText, { color: sc.text }]}>{sc.label}</Text>
         </View>
+        {paymentBadge && (
+          <View style={[styles.statusBadge, { backgroundColor: paymentBadge.bg }]}>
+            <Text style={[styles.statusText, { color: paymentBadge.text }]}>{paymentBadge.label}</Text>
+          </View>
+        )}
         {b.booking_code && (
           <View style={styles.codeBox}>
             <Text style={styles.codeLabel}>CODE</Text>
             <Text style={styles.codeValue}>{b.booking_code}</Text>
           </View>
         )}
-        {!isCompleted && !isUnpaid && (
+        {!isCompleted && !isUnpaid && !isEftPending && (
           <Text style={styles.tapHint}>Tap for details →</Text>
         )}
         {isUnpaid && (
@@ -225,6 +241,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: '#fde68a',
   },
   urgentText: { fontSize: 12, color: '#92400e', fontWeight: '600' },
+  eftBanner: {
+    backgroundColor: '#fff7ed', paddingVertical: 8, paddingHorizontal: 16,
+    borderBottomWidth: 1, borderBottomColor: '#fed7aa',
+  },
+  eftBannerText: { fontSize: 12, color: '#c2410c', fontWeight: '600' },
 
   passBody: { flexDirection: 'row', alignItems: 'center', padding: 18, gap: 0 },
 

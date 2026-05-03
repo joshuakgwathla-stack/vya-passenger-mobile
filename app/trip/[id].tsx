@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
-  TouchableOpacity, Alert, ActivityIndicator, Platform,
+  TouchableOpacity, Alert, ActivityIndicator, Platform, TextInput,
 } from 'react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
-import { bookingsApi, reviewsApi } from '../../lib/api'
+import * as WebBrowser from 'expo-web-browser'
+import * as ImagePicker from 'expo-image-picker'
+import { bookingsApi, paymentsApi, reviewsApi } from '../../lib/api'
 import { COLORS } from '../../constants'
 
 function StarRating({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
@@ -31,6 +33,9 @@ export default function TripDetailScreen() {
   const [reviewComment, setReviewComment] = useState('')
   const [submittingReview, setSubmittingReview] = useState(false)
   const [reviewed, setReviewed] = useState(false)
+  const [proofUri, setProofUri] = useState<string | null>(null)
+  const [submittingProof, setSubmittingProof] = useState(false)
+  const [payingCard, setPayingCard] = useState(false)
 
   useEffect(() => {
     if (!bookingId) return
@@ -76,6 +81,58 @@ export default function TripDetailScreen() {
     }
   }
 
+  const handlePayWithCard = async () => {
+    setPayingCard(true)
+    try {
+      const payRes = await paymentsApi.initiate(bookingId)
+      const payUrl = payRes.data.data?.redirect_url || payRes.data.data?.payment_url
+      if (payUrl) {
+        await WebBrowser.openBrowserAsync(payUrl)
+        const statusRes = await paymentsApi.getStatus(bookingId)
+        if (statusRes.data.data?.payment_status === 'paid') {
+          const { data } = await bookingsApi.getBooking(bookingId)
+          setBooking(data.data)
+        } else {
+          Alert.alert('Payment pending', 'Finish payment to confirm your seat.')
+        }
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.message || 'Could not initiate payment')
+    } finally {
+      setPayingCard(false)
+    }
+  }
+
+  const pickProofImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow access to your photos to upload proof of payment.')
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 })
+    if (!result.canceled && result.assets?.[0]) setProofUri(result.assets[0].uri)
+  }
+
+  const submitEftProof = async () => {
+    if (!proofUri) return
+    setSubmittingProof(true)
+    try {
+      const filename = proofUri.split('/').pop() || 'proof.jpg'
+      const mime = filename.endsWith('.png') ? 'image/png' : 'image/jpeg'
+      const formData = new FormData()
+      formData.append('proof_of_payment', { uri: proofUri, name: filename, type: mime } as any)
+      await bookingsApi.submitEftProof(bookingId, formData)
+      Alert.alert('✅ Proof submitted!', "We'll verify your payment and confirm your booking. You'll be notified once approved.")
+      const { data } = await bookingsApi.getBooking(bookingId)
+      setBooking(data.data)
+      setProofUri(null)
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.message || 'Upload failed')
+    } finally {
+      setSubmittingProof(false)
+    }
+  }
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -88,6 +145,8 @@ export default function TripDetailScreen() {
 
   const dep = new Date(booking.departure_time || booking.trip?.departure_time)
   const isPaid = booking.payment_status === 'paid'
+  const isEftPending = booking.payment_status === 'eft_pending'
+  const isUnpaid = booking.payment_status === 'unpaid' && booking.status !== 'cancelled'
   const isCompleted = booking.status === 'completed'
   const isCancellable = ['confirmed', 'pending'].includes(booking.status) && new Date() < dep
 
@@ -201,6 +260,56 @@ export default function TripDetailScreen() {
           </TouchableOpacity>
         )}
 
+        {/* EFT under review notice */}
+        {isEftPending && (
+          <View style={styles.eftPendingCard}>
+            <Text style={styles.eftPendingTitle}>🕐 EFT under review</Text>
+            <Text style={styles.eftPendingText}>Your proof of payment has been submitted. We'll verify and confirm your booking within a few hours.</Text>
+          </View>
+        )}
+
+        {/* Payment required */}
+        {isUnpaid && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Complete your payment</Text>
+            <Text style={styles.paySubtext}>Your seat is held but not confirmed until payment is received.</Text>
+
+            <TouchableOpacity style={styles.payCardBtn} onPress={handlePayWithCard} disabled={payingCard} activeOpacity={0.85}>
+              {payingCard
+                ? <ActivityIndicator color="white" />
+                : <Text style={styles.payCardBtnText}>💳 Pay with Card / Instant EFT</Text>
+              }
+            </TouchableOpacity>
+
+            <View style={styles.orDivider}>
+              <View style={styles.orLine} />
+              <Text style={styles.orText}>or</Text>
+              <View style={styles.orLine} />
+            </View>
+
+            <Text style={styles.eftUploadLabel}>Upload EFT proof of payment</Text>
+            <TouchableOpacity style={styles.eftPickBtn} onPress={pickProofImage} activeOpacity={0.85}>
+              {proofUri
+                ? <Text style={styles.eftPickBtnText}>✅ Image selected — tap to change</Text>
+                : <Text style={styles.eftPickBtnText}>📎 Choose image from gallery</Text>
+              }
+            </TouchableOpacity>
+            {proofUri && (
+              <TouchableOpacity
+                style={[styles.eftSubmitBtn, submittingProof && { opacity: 0.5 }]}
+                onPress={submitEftProof}
+                disabled={submittingProof}
+                activeOpacity={0.85}
+              >
+                {submittingProof
+                  ? <ActivityIndicator color="white" />
+                  : <Text style={styles.eftSubmitBtnText}>Submit Proof of Payment</Text>
+                }
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         {/* Review */}
         {isCompleted && !reviewed && (
           <View style={styles.card}>
@@ -208,14 +317,16 @@ export default function TripDetailScreen() {
             <StarRating value={reviewRating} onChange={setReviewRating} />
             <View style={styles.field}>
               <Text style={styles.label}>Comment (optional)</Text>
-              <View style={styles.textArea}>
-                <Text
-                  style={styles.textAreaInput}
-                  onPress={() => {}}
-                >
-                  {reviewComment || 'How was your experience?'}
-                </Text>
-              </View>
+              <TextInput
+                style={styles.textArea}
+                value={reviewComment}
+                onChangeText={setReviewComment}
+                placeholder="How was your experience?"
+                placeholderTextColor={COLORS.textMuted}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+              />
             </View>
             <TouchableOpacity style={styles.reviewBtn} onPress={handleReview} disabled={submittingReview}>
               {submittingReview
@@ -306,11 +417,40 @@ const styles = StyleSheet.create({
   textArea: {
     borderWidth: 1, borderColor: COLORS.border, borderRadius: 10,
     padding: 14, backgroundColor: COLORS.offWhite, minHeight: 80,
+    fontSize: 14, color: COLORS.text,
   },
-  textAreaInput: { fontSize: 14, color: COLORS.textMuted },
   reviewBtn: {
     backgroundColor: COLORS.navy, borderRadius: 12, padding: 14, alignItems: 'center',
   },
   reviewBtnText: { color: 'white', fontWeight: '700', fontSize: 14 },
   reviewedText: { fontSize: 14, color: COLORS.textSecondary, marginTop: 8, textAlign: 'center' },
+
+  // EFT pending
+  eftPendingCard: {
+    backgroundColor: '#fff7ed', borderRadius: 14, padding: 18, gap: 8,
+    borderWidth: 1, borderColor: '#fed7aa',
+  },
+  eftPendingTitle: { fontSize: 15, fontWeight: '700', color: '#c2410c' },
+  eftPendingText: { fontSize: 13, color: '#9a3412', lineHeight: 18 },
+
+  // Payment required
+  paySubtext: { fontSize: 13, color: COLORS.textSecondary, lineHeight: 18 },
+  payCardBtn: {
+    backgroundColor: COLORS.navy, borderRadius: 12, padding: 14, alignItems: 'center',
+  },
+  payCardBtnText: { color: 'white', fontWeight: '700', fontSize: 14 },
+  orDivider: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  orLine: { flex: 1, height: 1, backgroundColor: COLORS.border },
+  orText: { fontSize: 12, color: COLORS.textMuted, fontWeight: '600' },
+  eftUploadLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
+  eftPickBtn: {
+    borderWidth: 1, borderColor: COLORS.border, borderRadius: 12,
+    padding: 14, alignItems: 'center', backgroundColor: COLORS.offWhite,
+    borderStyle: 'dashed',
+  },
+  eftPickBtnText: { fontSize: 14, color: COLORS.navy, fontWeight: '600' },
+  eftSubmitBtn: {
+    backgroundColor: COLORS.gold, borderRadius: 12, padding: 14, alignItems: 'center',
+  },
+  eftSubmitBtnText: { color: COLORS.navy, fontWeight: '800', fontSize: 14 },
 })

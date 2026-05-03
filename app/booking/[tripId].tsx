@@ -7,10 +7,12 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
 import * as Location from 'expo-location'
+import * as ImagePicker from 'expo-image-picker'
 import axios from 'axios'
 import { tripsApi, bookingsApi, paymentsApi, pickupPointsApi } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { COLORS } from '../../constants'
+import { getSavedAddress, setSavedAddress } from '../../lib/savedAddress'
 
 const PLACES_KEY = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY || ''
 
@@ -202,8 +204,16 @@ export default function BookingScreen() {
   const [seats, setSeats] = useState(1)
   const [pickup, setPickup] = useState('')
   const [dropoff, setDropoff] = useState('')
+  const [savedAddress, setSavedAddressState] = useState<string | null>(null)
   const [booking, setBooking] = useState(false)
   const [paying, setPaying] = useState(false)
+  const [payMethod, setPayMethod] = useState<'card' | 'eft'>('card')
+
+  // EFT proof-of-payment state (shown after booking is created)
+  const [eftBookingId, setEftBookingId] = useState<string | null>(null)
+  const [eftPickupCode, setEftPickupCode] = useState<string | null>(null)
+  const [proofUri, setProofUri] = useState<string | null>(null)
+  const [submittingProof, setSubmittingProof] = useState(false)
 
   // Hub state
   const [hubs, setHubs] = useState<any[]>([])
@@ -211,19 +221,30 @@ export default function BookingScreen() {
   const [showHubModal, setShowHubModal] = useState(false)
 
   useEffect(() => {
-    tripsApi.getTrip(tripId)
-      .then(({ data }) => {
-        const t = data.data
+    const load = async () => {
+      try {
+        const [tripRes, saved] = await Promise.all([
+          tripsApi.getTrip(tripId),
+          getSavedAddress(),
+        ])
+        const t = tripRes.data.data
         setTrip(t)
-        // Pre-load hubs for the trip's origin city
+        if (saved) {
+          setSavedAddressState(saved)
+          setPickup(saved)
+        }
         if (t?.origin_city) {
           pickupPointsApi.getByCity(t.origin_city)
             .then(r => setHubs(r.data.data || []))
             .catch(() => {})
         }
-      })
-      .catch(() => Alert.alert('Error', 'Could not load trip details'))
-      .finally(() => setLoading(false))
+      } catch {
+        Alert.alert('Error', 'Could not load trip details')
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
   }, [tripId])
 
   const selectHub = (hub: any) => {
@@ -247,6 +268,7 @@ export default function BookingScreen() {
   }
   if (!trip) return null
 
+  // ── Price calculations (needed by EFT screen and main booking form) ───────
   const dep = new Date(trip.departure_time)
   const pricePerSeat = Number(trip.price_per_seat)
   const availableSeats = trip.available_seats ?? 0
@@ -254,6 +276,131 @@ export default function BookingScreen() {
   const baseTotal = pricePerSeat * seats
   const discountAmount = parseFloat((baseTotal * hubDiscount / 100).toFixed(2))
   const finalTotal = (baseTotal - discountAmount).toFixed(2)
+
+  const pickProofImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow access to your photos to upload proof of payment.')
+      return
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      allowsEditing: false,
+    })
+    if (!result.canceled && result.assets[0]) {
+      setProofUri(result.assets[0].uri)
+    }
+  }
+
+  const submitEftProof = async () => {
+    if (!proofUri || !eftBookingId) return
+    setSubmittingProof(true)
+    try {
+      const formData = new FormData()
+      const filename = proofUri.split('/').pop() || 'proof.jpg'
+      const ext = filename.split('.').pop()?.toLowerCase() || 'jpg'
+      const mime = ext === 'png' ? 'image/png' : 'image/jpeg'
+      formData.append('proof_of_payment', { uri: proofUri, name: filename, type: mime } as any)
+      await bookingsApi.submitEftProof(eftBookingId, formData)
+      Alert.alert(
+        '✅ Proof submitted!',
+        'We\'ll verify your payment and confirm your booking. You\'ll be notified once approved.',
+        [{ text: 'View Booking', onPress: () => router.replace(`/trip/${trip.id}?bookingId=${eftBookingId}`) }]
+      )
+    } catch (err: any) {
+      Alert.alert('Upload failed', err.response?.data?.message || 'Please try again.')
+    } finally { setSubmittingProof(false) }
+  }
+
+  // ── EFT proof-of-payment screen ───────────────────────────────────────────
+  if (eftBookingId && eftPickupCode) {
+    const bankName   = process.env.EXPO_PUBLIC_BANK_NAME || 'FNB'
+    const accName    = process.env.EXPO_PUBLIC_BANK_ACCOUNT_NAME || 'Vya Shuttle (Pty) Ltd'
+    const accNumber  = process.env.EXPO_PUBLIC_BANK_ACCOUNT_NUMBER || ''
+    const branchCode = process.env.EXPO_PUBLIC_BANK_BRANCH_CODE || ''
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.topBar}>
+          <View style={{ width: 36 }} />
+          <Text style={styles.topTitle}>EFT Payment</Text>
+          <View style={{ width: 36 }} />
+        </View>
+        <ScrollView contentContainerStyle={[styles.scroll, { gap: 16 }]} showsVerticalScrollIndicator={false}>
+
+          {/* Reference highlight */}
+          <View style={styles.eftRefCard}>
+            <Text style={styles.eftRefLabel}>YOUR PAYMENT REFERENCE</Text>
+            <Text style={styles.eftRefCode}>{eftPickupCode}</Text>
+            <Text style={styles.eftRefHint}>Use this exact reference when making your EFT. This is also your boarding code.</Text>
+          </View>
+
+          {/* Bank details */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Bank Details</Text>
+            {[
+              { label: 'Bank',           value: bankName },
+              { label: 'Account name',   value: accName },
+              { label: 'Account number', value: accNumber },
+              { label: 'Branch code',    value: branchCode },
+              { label: 'Reference',      value: eftPickupCode },
+              { label: 'Amount',         value: `R${finalTotal}` },
+            ].map(({ label, value }) => (
+              <View key={label} style={styles.eftDetailRow}>
+                <Text style={styles.eftDetailLabel}>{label}</Text>
+                <Text style={[styles.eftDetailValue, label === 'Reference' && { color: COLORS.navy, fontWeight: '800' }]}>{value}</Text>
+              </View>
+            ))}
+            <Text style={styles.eftEmailNote}>Upload your proof of payment below — we'll verify and confirm your booking within a few hours.</Text>
+          </View>
+
+          {/* Proof upload */}
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Upload Proof of Payment</Text>
+            <Text style={styles.eftProofSub}>Take a screenshot or photo of your EFT confirmation and upload it here. We'll verify and confirm your booking.</Text>
+            <TouchableOpacity style={styles.eftUploadBtn} onPress={pickProofImage} activeOpacity={0.85}>
+              {proofUri ? (
+                <View style={styles.eftUploadDone}>
+                  <Text style={styles.eftUploadDoneIcon}>✅</Text>
+                  <Text style={styles.eftUploadDoneText}>Image selected — ready to submit</Text>
+                  <TouchableOpacity onPress={pickProofImage}>
+                    <Text style={styles.eftChangeText}>Change</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <>
+                  <Text style={styles.eftUploadIcon}>📎</Text>
+                  <Text style={styles.eftUploadText}>Tap to choose image</Text>
+                  <Text style={styles.eftUploadSub}>JPG or PNG from your gallery</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.eftSubmitBtn, (!proofUri || submittingProof) && { opacity: 0.5 }]}
+              onPress={submitEftProof}
+              disabled={!proofUri || submittingProof}
+              activeOpacity={0.85}
+            >
+              {submittingProof
+                ? <ActivityIndicator color="white" />
+                : <Text style={styles.eftSubmitText}>Submit Proof of Payment</Text>
+              }
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.eftLaterBtn}
+              onPress={() => router.replace(`/trip/${trip.id}?bookingId=${eftBookingId}`)}
+            >
+              <Text style={styles.eftLaterText}>I'll submit proof later from My Bookings</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ height: 40 }} />
+        </ScrollView>
+      </SafeAreaView>
+    )
+  }
 
   const handleBook = async () => {
     if (!pickup.trim()) {
@@ -274,6 +421,21 @@ export default function BookingScreen() {
         }],
       })
       const bookingId = data.data.id
+      const pickupCode = data.data.pickup_code
+
+      // Save door-to-door address for next time (not hub addresses)
+      if (!selectedHub && pickup.trim()) {
+        setSavedAddress(pickup.trim()).catch(() => {})
+      }
+
+      if (payMethod === 'eft') {
+        // Show EFT proof-of-payment screen instead of navigating away
+        setEftBookingId(bookingId)
+        setEftPickupCode(pickupCode)
+        return
+      }
+
+      // Card — PayFast
       setPaying(true)
       const payRes = await paymentsApi.initiate(bookingId)
       const payUrl = payRes.data.data?.redirect_url || payRes.data.data?.payment_url
@@ -414,7 +576,7 @@ export default function BookingScreen() {
               value={selectedHub ? `${selectedHub.name}, ${selectedHub.address}` : pickup}
               onChange={setPickup}
               placeholder="Your pickup address *"
-              autoDetect={!selectedHub}
+              autoDetect={!selectedHub && !savedAddress}
               dotColor="#34d399"
             />
             <View style={styles.addressConnector} />
@@ -426,7 +588,12 @@ export default function BookingScreen() {
             />
           </View>
 
-          {!selectedHub && (
+          {!selectedHub && savedAddress && pickup === savedAddress && (
+            <View style={styles.savedAddressHint}>
+              <Text style={styles.savedAddressHintText}>🏠 Using your saved address — tap the field to change</Text>
+            </View>
+          )}
+          {!selectedHub && !savedAddress && (
             <Text style={styles.addressHint}>Your driver comes to your door — no taxi rank needed.</Text>
           )}
         </View>
@@ -443,6 +610,31 @@ export default function BookingScreen() {
               <View style={styles.stepNum}><Text style={styles.stepNumText}>{i + 1}</Text></View>
               <Text style={styles.stepText}>{s}</Text>
             </View>
+          ))}
+        </View>
+
+        {/* Payment method */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>How would you like to pay?</Text>
+          {([
+            { id: 'card', emoji: '💳', label: 'Card / Instant EFT', sub: 'Pay now securely via PayFast' },
+            { id: 'eft',  emoji: '🏦', label: 'Manual EFT',         sub: 'Bank transfer + upload proof' },
+          ] as const).map(opt => (
+            <TouchableOpacity
+              key={opt.id}
+              style={[styles.methodRow, payMethod === opt.id && styles.methodRowActive]}
+              onPress={() => setPayMethod(opt.id)}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.methodRadio, payMethod === opt.id && styles.methodRadioActive]}>
+                {payMethod === opt.id && <View style={styles.methodRadioDot} />}
+              </View>
+              <Text style={styles.methodEmoji}>{opt.emoji}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.methodLabel, payMethod === opt.id && { color: COLORS.navy }]}>{opt.label}</Text>
+                <Text style={styles.methodSub}>{opt.sub}</Text>
+              </View>
+            </TouchableOpacity>
           ))}
         </View>
 
@@ -470,7 +662,9 @@ export default function BookingScreen() {
         >
           {booking || paying
             ? <ActivityIndicator color={COLORS.navy} />
-            : <Text style={styles.payBtnText}>Pay with PayFast →</Text>
+            : <Text style={styles.payBtnText}>
+                {payMethod === 'card' ? 'Pay with PayFast →' : 'Reserve via EFT →'}
+              </Text>
           }
         </TouchableOpacity>
       </View>
@@ -567,6 +761,12 @@ const styles = StyleSheet.create({
   detectingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
   detectingText: { fontSize: 14, color: COLORS.textSecondary },
   addressHint: { fontSize: 12, color: COLORS.textMuted, lineHeight: 18 },
+  savedAddressHint: {
+    backgroundColor: '#eff6ff', borderRadius: 8,
+    paddingVertical: 7, paddingHorizontal: 10,
+    borderWidth: 1, borderColor: '#bfdbfe',
+  },
+  savedAddressHintText: { fontSize: 12, color: '#1d4ed8', fontWeight: '600' },
 
   // Dropdown
   dropdown: {
@@ -587,6 +787,54 @@ const styles = StyleSheet.create({
   stepNum: { width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.navy, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   stepNumText: { fontSize: 12, fontWeight: '700', color: COLORS.gold },
   stepText: { flex: 1, fontSize: 13, color: COLORS.textSecondary, lineHeight: 20, paddingTop: 2 },
+
+  // EFT proof screen
+  eftRefCard: {
+    backgroundColor: COLORS.navy, borderRadius: 20, padding: 22, alignItems: 'center', gap: 8,
+  },
+  eftRefLabel: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.5)', letterSpacing: 1, textTransform: 'uppercase' },
+  eftRefCode: { fontSize: 36, fontWeight: '900', color: COLORS.gold, letterSpacing: 4 },
+  eftRefHint: { fontSize: 12, color: 'rgba(255,255,255,0.6)', textAlign: 'center', lineHeight: 18, marginTop: 4 },
+  eftDetailRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: COLORS.border },
+  eftDetailLabel: { fontSize: 13, color: COLORS.textSecondary },
+  eftDetailValue: { fontSize: 13, fontWeight: '600', color: COLORS.text },
+  eftEmailNote: { fontSize: 12, color: COLORS.textMuted, lineHeight: 18, marginTop: 8 },
+  eftProofSub: { fontSize: 13, color: COLORS.textSecondary, lineHeight: 18 },
+  eftUploadBtn: {
+    borderWidth: 2, borderColor: COLORS.border, borderStyle: 'dashed', borderRadius: 14,
+    padding: 24, alignItems: 'center', gap: 6, backgroundColor: COLORS.offWhite,
+  },
+  eftUploadDone: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  eftUploadDoneIcon: { fontSize: 20 },
+  eftUploadDoneText: { fontSize: 14, fontWeight: '600', color: COLORS.success, flex: 1 },
+  eftChangeText: { fontSize: 13, color: COLORS.navy, fontWeight: '600' },
+  eftUploadIcon: { fontSize: 28 },
+  eftUploadText: { fontSize: 14, fontWeight: '700', color: COLORS.navy },
+  eftUploadSub: { fontSize: 12, color: COLORS.textMuted },
+  eftSubmitBtn: {
+    backgroundColor: COLORS.navy, borderRadius: 14, padding: 16, alignItems: 'center',
+  },
+  eftSubmitText: { color: 'white', fontWeight: '800', fontSize: 15 },
+  eftLaterBtn: { alignItems: 'center', padding: 12 },
+  eftLaterText: { fontSize: 13, color: COLORS.textMuted, textDecorationLine: 'underline' },
+
+  // Payment method selector
+  methodRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    padding: 14, borderRadius: 12,
+    borderWidth: 1.5, borderColor: COLORS.border, backgroundColor: COLORS.offWhite,
+  },
+  methodRowActive: { borderColor: COLORS.navy, backgroundColor: '#f0f4ff' },
+  methodRadio: {
+    width: 20, height: 20, borderRadius: 10,
+    borderWidth: 2, borderColor: COLORS.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  methodRadioActive: { borderColor: COLORS.navy },
+  methodRadioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.navy },
+  methodEmoji: { fontSize: 20 },
+  methodLabel: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary },
+  methodSub: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
 
   // Sticky pay bar
   payBar: {

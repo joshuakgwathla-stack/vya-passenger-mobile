@@ -59,6 +59,8 @@ export const bookingsApi = {
   cancelPreview: (id: string) => api.patch(`/bookings/${id}/cancel?preview=true`),
   cancel: (id: string) => api.patch(`/bookings/${id}/cancel`),
   confirm: (id: string, ref: string) => api.patch(`/bookings/${id}/confirm`, { payment_reference: ref }),
+  submitEftProof: (id: string, formData: FormData) =>
+    api.post(`/bookings/${id}/eft-proof`, formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
 }
 
 export const paymentsApi = {
