@@ -152,18 +152,21 @@ function AddressInput({
 
 // ── Hub picker modal ──────────────────────────────────────────
 function HubModal({
-  visible, hubs, onSelect, onClose, discountPct,
+  visible, hubs, onSelect, onClose, discountPct, isDropoff = false,
 }: {
-  visible: boolean; hubs: any[]; onSelect: (hub: any) => void; onClose: () => void; discountPct: number
+  visible: boolean; hubs: any[]; onSelect: (hub: any) => void; onClose: () => void; discountPct: number; isDropoff?: boolean
 }) {
   return (
     <Modal visible={visible} animationType="slide" transparent presentationStyle="overFullScreen">
       <View style={styles.modalOverlay}>
         <View style={styles.modalSheet}>
           <View style={styles.modalHandle} />
-          <Text style={styles.modalTitle}>Choose a pickup hub</Text>
+          <Text style={styles.modalTitle}>{isDropoff ? 'Choose a drop-off hub' : 'Choose a pickup hub'}</Text>
           <Text style={styles.modalSubtitle}>
-            Save {discountPct}% on your trip — meet your driver at one of these convenient spots instead of door-to-door pickup.
+            {isDropoff
+              ? 'Your driver will drop you at one of these convenient spots.'
+              : `Save ${discountPct}% on your trip — meet your driver at one of these convenient spots instead of door-to-door pickup.`
+            }
           </Text>
           <FlatList
             data={hubs}
@@ -177,9 +180,11 @@ function HubModal({
                   <Text style={styles.hubName}>{h.name}</Text>
                   <Text style={styles.hubAddress} numberOfLines={1}>{h.address}</Text>
                 </View>
-                <View style={styles.hubSaveBadge}>
-                  <Text style={styles.hubSaveText}>−{h.discount_percentage}%</Text>
-                </View>
+                {!isDropoff && h.discount_percentage > 0 && (
+                  <View style={styles.hubSaveBadge}>
+                    <Text style={styles.hubSaveText}>−{h.discount_percentage}%</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             )}
             ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: COLORS.border }} />}
@@ -215,10 +220,14 @@ export default function BookingScreen() {
   const [proofUri, setProofUri] = useState<string | null>(null)
   const [submittingProof, setSubmittingProof] = useState(false)
 
-  // Hub state
+  // Hub state — pickup
   const [hubs, setHubs] = useState<any[]>([])
   const [selectedHub, setSelectedHub] = useState<any>(null)
   const [showHubModal, setShowHubModal] = useState(false)
+  // Hub state — drop-off
+  const [destHubs, setDestHubs] = useState<any[]>([])
+  const [selectedDestHub, setSelectedDestHub] = useState<any>(null)
+  const [showDestHubModal, setShowDestHubModal] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -236,6 +245,12 @@ export default function BookingScreen() {
         if (t?.origin_city) {
           pickupPointsApi.getByCity(t.origin_city)
             .then(r => setHubs(r.data.data || []))
+            .catch(() => {})
+        }
+        const destCity = t?.alighting_city || t?.destination_city
+        if (destCity) {
+          pickupPointsApi.getByCity(destCity)
+            .then(r => setDestHubs(r.data.data || []))
             .catch(() => {})
         }
       } catch {
@@ -256,6 +271,17 @@ export default function BookingScreen() {
   const clearHub = () => {
     setSelectedHub(null)
     setPickup('')
+  }
+
+  const selectDestHub = (hub: any) => {
+    setSelectedDestHub(hub)
+    setDropoff(`${hub.name}, ${hub.address}`)
+    setShowDestHubModal(false)
+  }
+
+  const clearDestHub = () => {
+    setSelectedDestHub(null)
+    setDropoff('')
   }
 
   if (loading) {
@@ -413,8 +439,9 @@ export default function BookingScreen() {
         trip_id: tripId,
         seats_booked: seats,
         pickup_address: pickup,
-        dropoff_address: dropoff,
+        dropoff_address: dropoff || undefined,
         pickup_point_id: selectedHub?.id || undefined,
+        dropoff_point_id: selectedDestHub?.id || undefined,
         passengers: [{
           name: `${user?.first_name} ${user?.last_name}`,
           email: user?.email, phone: user?.phone, is_account_holder: true,
@@ -557,7 +584,7 @@ export default function BookingScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Selected hub display */}
+          {/* Selected pickup hub display */}
           {selectedHub && (
             <View style={styles.selectedHubCard}>
               <View style={styles.selectedHubInfo}>
@@ -570,7 +597,7 @@ export default function BookingScreen() {
             </View>
           )}
 
-          {/* Address fields */}
+          {/* Pickup address (locked when hub selected) */}
           <View style={[styles.addressBlock, selectedHub && { opacity: 0.5 }]} pointerEvents={selectedHub ? 'none' : 'auto'}>
             <AddressInput
               value={selectedHub ? `${selectedHub.name}, ${selectedHub.address}` : pickup}
@@ -578,13 +605,6 @@ export default function BookingScreen() {
               placeholder="Your pickup address *"
               autoDetect={!selectedHub && !savedAddress}
               dotColor="#34d399"
-            />
-            <View style={styles.addressConnector} />
-            <AddressInput
-              value={dropoff}
-              onChange={setDropoff}
-              placeholder={`Drop-off in ${trip.destination_city} (optional)`}
-              dotColor={COLORS.navy}
             />
           </View>
 
@@ -596,6 +616,54 @@ export default function BookingScreen() {
           {!selectedHub && !savedAddress && (
             <Text style={styles.addressHint}>Your driver comes to your door — no taxi rank needed.</Text>
           )}
+
+          {/* Drop-off section */}
+          <View style={styles.dropoffSection}>
+            <View style={styles.addressConnector} />
+
+            {/* Drop-off hub toggle (only shown if destination has hubs) */}
+            {destHubs.length > 0 && (
+              <View style={styles.dropoffModeTabs}>
+                <TouchableOpacity
+                  style={[styles.dropoffModeTab, !selectedDestHub && styles.dropoffModeTabActive]}
+                  onPress={clearDestHub}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.dropoffModeText, !selectedDestHub && styles.dropoffModeTextActive]}>🏠 My address</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.dropoffModeTab, !!selectedDestHub && styles.dropoffModeTabActive]}
+                  onPress={() => setShowDestHubModal(true)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.dropoffModeText, !!selectedDestHub && styles.dropoffModeTextActive]}>🏢 Hub drop-off</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Selected destination hub display */}
+            {selectedDestHub && (
+              <View style={[styles.selectedHubCard, { marginTop: 8 }]}>
+                <View style={styles.selectedHubInfo}>
+                  <Text style={styles.selectedHubName}>{selectedDestHub.name}</Text>
+                  <Text style={styles.selectedHubAddress} numberOfLines={1}>{selectedDestHub.address}</Text>
+                </View>
+                <TouchableOpacity style={styles.changeHubBtn} onPress={() => setShowDestHubModal(true)}>
+                  <Text style={styles.changeHubText}>Change</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Drop-off address input (locked when dest hub selected) */}
+            <View style={[selectedDestHub && { opacity: 0.5 }]} pointerEvents={selectedDestHub ? 'none' : 'auto'}>
+              <AddressInput
+                value={selectedDestHub ? `${selectedDestHub.name}, ${selectedDestHub.address}` : dropoff}
+                onChange={v => { setDropoff(v); if (selectedDestHub) setSelectedDestHub(null) }}
+                placeholder={`Drop-off in ${trip.alighting_city || trip.destination_city} (optional)`}
+                dotColor={COLORS.navy}
+              />
+            </View>
+          </View>
         </View>
 
         {/* Steps */}
@@ -675,6 +743,14 @@ export default function BookingScreen() {
         discountPct={hubs[0]?.discount_percentage || 10}
         onSelect={selectHub}
         onClose={() => setShowHubModal(false)}
+      />
+      <HubModal
+        visible={showDestHubModal}
+        hubs={destHubs}
+        discountPct={0}
+        isDropoff
+        onSelect={selectDestHub}
+        onClose={() => setShowDestHubModal(false)}
       />
     </SafeAreaView>
   )
@@ -767,6 +843,19 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#bfdbfe',
   },
   savedAddressHintText: { fontSize: 12, color: '#1d4ed8', fontWeight: '600' },
+
+  // Drop-off section
+  dropoffSection: { marginTop: 4 },
+  dropoffModeTabs: {
+    flexDirection: 'row', gap: 8, marginBottom: 8, marginTop: 4,
+  },
+  dropoffModeTab: {
+    flex: 1, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10,
+    borderWidth: 1.5, borderColor: COLORS.border, alignItems: 'center',
+  },
+  dropoffModeTabActive: { borderColor: COLORS.navy, backgroundColor: '#f0f4ff' },
+  dropoffModeText: { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary },
+  dropoffModeTextActive: { color: COLORS.navy },
 
   // Dropdown
   dropdown: {
