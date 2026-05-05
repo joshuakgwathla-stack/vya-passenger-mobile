@@ -140,14 +140,17 @@ function TripCard({ trip, onBook }: { trip: any; onBook: () => void }) {
   )
 }
 
-// ── Compact slot picker (shown after tapping a popular route) ─────────────────
+// ── Compact slot picker ────────────────────────────────────────────────────────
 function SlotPicker({
   trips, origin, destination, dateLabel, loading,
   onBook, onReset, onChangeDate, dateIdx, onDateIdx,
+  returnTrips, returnDateIdx, returnLoading, onReturnDateChange, onReturnBook, onReturnDateIdx,
 }: {
   trips: any[]; origin: string; destination: string; dateLabel: string; loading: boolean
   onBook: (id: string) => void; onReset: () => void
   onChangeDate: (idx: number) => void; dateIdx: number; onDateIdx: (i: number) => void
+  returnTrips?: any[]; returnDateIdx?: number; returnLoading?: boolean
+  onReturnDateChange?: (idx: number) => void; onReturnBook?: (id: string) => void; onReturnDateIdx?: (i: number) => void
 }) {
   return (
     <View style={slot.wrap}>
@@ -242,6 +245,73 @@ function SlotPicker({
           )
         })
       )}
+
+      {/* Return trip section */}
+      {returnTrips !== undefined && onReturnBook && onReturnDateChange && onReturnDateIdx && (
+        <View style={slot.returnSection}>
+          <View style={slot.returnHeader}>
+            <Text style={slot.returnTitle}>🔄  Return trip</Text>
+            <Text style={slot.returnSub}>{destination} → {origin}</Text>
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={slot.dateRow}>
+            {DATES.map((d, i) => i >= (returnDateIdx ?? 0) - 1 && (
+              <TouchableOpacity
+                key={d.value}
+                style={[slot.datePill, (returnDateIdx ?? 0) === i && slot.datePillActive]}
+                onPress={() => { onReturnDateIdx(i); onReturnDateChange(i) }}
+              >
+                <Text style={[slot.datePillText, (returnDateIdx ?? 0) === i && slot.datePillTextActive]}>
+                  {d.short}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {returnLoading ? (
+            <View style={slot.loadingRow}>
+              <ActivityIndicator color={COLORS.navy} size="small" />
+              <Text style={slot.loadingText}>Finding return trips…</Text>
+            </View>
+          ) : returnTrips.length === 0 ? (
+            <View style={slot.empty}>
+              <Text style={slot.emptyText}>No slots on this date</Text>
+              <Text style={slot.emptyHint}>Try the next day</Text>
+            </View>
+          ) : (
+            returnTrips.map(trip => {
+              const dep = new Date(trip.departure_time)
+              const time = dep.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false })
+              const isPhantom = trip.driver_assigned === false
+              const isFullyBooked = trip.fully_booked === true
+              if (isFullyBooked) {
+                return (
+                  <View key={trip.id} style={[slot.row, slot.rowFullyBooked]}>
+                    <Text style={slot.timeBooked}>{time}</Text>
+                    <View style={{ flex: 1 }} />
+                    <Text style={slot.fullyBookedLabel}>Fully booked</Text>
+                  </View>
+                )
+              }
+              return (
+                <TouchableOpacity key={trip.id} style={slot.row} onPress={() => onReturnBook(trip.id)} activeOpacity={0.8}>
+                  {isPhantom && <View style={slot.phantomDot} />}
+                  <Text style={slot.time}>{time}</Text>
+                  <View style={{ flex: 1 }} />
+                  <Text style={slot.price}>R{Number(trip.price_per_seat).toFixed(0)}</Text>
+                  {isPhantom
+                    ? <Text style={slot.phantomLabel}>Driver TBC</Text>
+                    : <Text style={slot.seats}>{trip.available_seats} seats</Text>
+                  }
+                  <View style={[slot.bookBtn, isPhantom && slot.bookBtnDark]}>
+                    <Text style={slot.bookBtnText}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
+                  </View>
+                </TouchableOpacity>
+              )
+            })
+          )}
+        </View>
+      )}
     </View>
   )
 }
@@ -256,13 +326,16 @@ export default function HomeScreen() {
   const [dateIdx, setDateIdx] = useState(0)
   const [results, setResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-  const [searched, setSearched] = useState(false)
-  const [slotMode, setSlotMode] = useState(false)
+  const [showSlots, setShowSlots] = useState(false)
   const [upcomingBooking, setUpcomingBooking] = useState<any>(null)
   const [lastBooking, setLastBooking] = useState<any>(null)
   const [showOriginPicker, setShowOriginPicker] = useState(false)
   const [showDestPicker, setShowDestPicker] = useState(false)
   const [detectingCity, setDetectingCity] = useState(false)
+  // Return trip
+  const [returnDateIdx, setReturnDateIdx] = useState(1)
+  const [returnResults, setReturnResults] = useState<any[]>([])
+  const [returnLoading, setReturnLoading] = useState(false)
   const scrollRef = useRef<ScrollView>(null)
 
   useEffect(() => { loadBookings(); initOriginCity() }, [])
@@ -301,7 +374,7 @@ export default function HomeScreen() {
     if (!o || !d) { setShowDestPicker(true); return }
     const idx = overrideDateIdx ?? dateIdx
     setLoading(true)
-    setSearched(true)
+    setShowSlots(true)
     setResults([])
     try {
       const { data } = await tripsApi.search({ origin: o, destination: d, date: DATES[idx].value })
@@ -314,23 +387,46 @@ export default function HomeScreen() {
     }
   }
 
+  const handleReturnSearch = async (overrideIdx?: number) => {
+    const idx = overrideIdx ?? returnDateIdx
+    setReturnLoading(true)
+    setReturnResults([])
+    try {
+      const { data } = await tripsApi.search({ origin: destination, destination: origin, date: DATES[idx].value })
+      setReturnResults(data.data || [])
+    } catch {
+      setReturnResults([])
+    } finally {
+      setReturnLoading(false)
+    }
+  }
+
   const handlePopularRoute = (route: typeof POPULAR_ROUTES[0]) => {
     setOrigin(route.origin)
     setDestination(route.destination)
-    setSlotMode(true)
-    setSearched(false)
+    setShowSlots(true)
+    const nextReturnIdx = Math.min(dateIdx + 1, DATES.length - 1)
+    setReturnDateIdx(nextReturnIdx)
     handleSearch(route.origin, route.destination)
+    handleReturnSearch(nextReturnIdx)
   }
 
   const handleSlotDateChange = (idx: number) => {
     setDateIdx(idx)
     handleSearch(origin, destination, idx)
+    // Push return date to at least the day after outbound
+    const newReturnIdx = Math.max(returnDateIdx, idx + 1)
+    if (newReturnIdx !== returnDateIdx) {
+      setReturnDateIdx(newReturnIdx)
+      handleReturnSearch(newReturnIdx)
+    }
   }
 
   const resetSlotMode = () => {
-    setSlotMode(false)
-    setSearched(false)
+    setShowSlots(false)
     setResults([])
+    setReturnResults([])
+    setDestination('')
   }
 
   const selectedDate = DATES[dateIdx]
@@ -353,7 +449,13 @@ export default function HomeScreen() {
         title="Travelling to"
         options={DESTINATION_CITIES}
         selected={destination}
-        onSelect={v => { setDestination(v); setSearched(false) }}
+        onSelect={v => {
+          setDestination(v)
+          const nextReturnIdx = Math.min(dateIdx + 1, DATES.length - 1)
+          setReturnDateIdx(nextReturnIdx)
+          handleSearch(origin, v)
+          handleReturnSearch(nextReturnIdx)
+        }}
         onClose={() => setShowDestPicker(false)}
       />
 
@@ -407,7 +509,7 @@ export default function HomeScreen() {
         )}
 
         {/* Book Again shortcut — shown when no upcoming trip but has past trips */}
-        {!upcomingBooking && lastBooking && !slotMode && (
+        {!upcomingBooking && lastBooking && !showSlots && (
           <TouchableOpacity
             style={styles.bookAgainCard}
             onPress={() => handlePopularRoute({
@@ -430,7 +532,7 @@ export default function HomeScreen() {
         )}
 
         {/* Search card — hidden when slot picker is active */}
-        {!slotMode && <View style={styles.searchCard}>
+        {!showSlots && <View style={styles.searchCard}>
           <Text style={styles.searchTitle}>Book a trip</Text>
 
           {/* Origin */}
@@ -467,7 +569,10 @@ export default function HomeScreen() {
               <TouchableOpacity
                 key={d.value}
                 style={[styles.datePill, dateIdx === i && styles.datePillActive]}
-                onPress={() => { setDateIdx(i); setSearched(false) }}
+                onPress={() => {
+                  setDateIdx(i)
+                  if (destination) handleSearch(origin, destination, i)
+                }}
               >
                 <Text style={[styles.datePillText, dateIdx === i && styles.datePillTextActive]}>
                   {d.short}
@@ -476,26 +581,23 @@ export default function HomeScreen() {
             ))}
           </ScrollView>
 
-          <TouchableOpacity
-            style={[styles.searchBtn, loading && styles.searchBtnLoading]}
-            onPress={() => handleSearch()}
-            disabled={loading}
-          >
-            {loading
-              ? <ActivityIndicator color={COLORS.navy} />
-              : <Text style={styles.searchBtnText}>
-                  🔍  Find Trips · {selectedDate.short}
-                </Text>
-            }
-          </TouchableOpacity>
+          {!destination ? (
+            <TouchableOpacity style={styles.searchBtn} onPress={() => setShowDestPicker(true)}>
+              <Text style={styles.searchBtnText}>📍  Where are you going?</Text>
+            </TouchableOpacity>
+          ) : loading ? (
+            <View style={[styles.searchBtn, styles.searchBtnLoading]}>
+              <ActivityIndicator color={COLORS.navy} />
+            </View>
+          ) : null}
 
           <View style={styles.hubHint}>
             <Text style={styles.hubHintText}>🏢 Save 10% by choosing a hub pickup when booking</Text>
           </View>
         </View>}
 
-        {/* Inline slot picker — shown after tapping a popular route */}
-        {slotMode && (
+        {/* Slot picker — shown once destination is selected */}
+        {showSlots && (
           <View style={{ paddingHorizontal: 16 }}>
             <SlotPicker
               trips={results}
@@ -508,56 +610,18 @@ export default function HomeScreen() {
               onChangeDate={handleSlotDateChange}
               dateIdx={dateIdx}
               onDateIdx={setDateIdx}
+              returnTrips={returnResults}
+              returnDateIdx={returnDateIdx}
+              returnLoading={returnLoading}
+              onReturnDateChange={idx => { setReturnDateIdx(idx); handleReturnSearch(idx) }}
+              onReturnBook={id => router.push(`/booking/${id}`)}
+              onReturnDateIdx={setReturnDateIdx}
             />
           </View>
         )}
 
-        {/* Full results — shown after manual search */}
-        {searched && !slotMode && !loading && (
-          <View style={styles.results}>
-            <View style={styles.resultsHeader}>
-              <Text style={styles.resultsTitle}>
-                {results.length > 0
-                  ? `${results.length} trip${results.length !== 1 ? 's' : ''} · ${origin} → ${destination}`
-                  : `${origin} → ${destination}`}
-              </Text>
-              <TouchableOpacity onPress={() => setSearched(false)}>
-                <Text style={styles.clearSearch}>Change</Text>
-              </TouchableOpacity>
-            </View>
-            {results.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyIcon}>📅</Text>
-                <Text style={styles.emptyTitle}>All slots filled on {selectedDate.full}</Text>
-                <Text style={styles.emptyHint}>This is a popular travel day — there are open seats on other dates. Try tomorrow or the day after.</Text>
-                <TouchableOpacity
-                  style={styles.tryAnotherBtn}
-                  onPress={() => {
-                    const next = Math.min(dateIdx + 1, DATES.length - 1)
-                    setDateIdx(next)
-                    handleSearch(origin, destination, next)
-                  }}
-                >
-                  <Text style={styles.tryAnotherText}>Try next day →</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => setSearched(false)}>
-                  <Text style={styles.changeDateText}>Change date manually</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              results.map(trip => (
-                <TripCard
-                  key={trip.id}
-                  trip={trip}
-                  onBook={() => router.push(`/booking/${trip.id}`)}
-                />
-              ))
-            )}
-          </View>
-        )}
-
-        {/* Popular routes (hidden in slot mode or after manual search) */}
-        {!slotMode && !searched && (
+        {/* Popular routes — hidden once slots are shown */}
+        {!showSlots && (
           <View style={styles.popular}>
             <View style={styles.popularHeader}>
               <Text style={styles.popularTitle}>Popular routes</Text>
@@ -903,6 +967,19 @@ const slot = StyleSheet.create({
   },
   bookBtnDark: { backgroundColor: '#1e293b' },
   bookBtnText: { fontSize: 13, fontWeight: '800', color: COLORS.navy },
+
+  // Return trip section
+  returnSection: {
+    borderTopWidth: 2, borderTopColor: COLORS.gold + '44',
+    backgroundColor: '#fffbeb',
+  },
+  returnHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: '#fde68a',
+  },
+  returnTitle: { fontSize: 14, fontWeight: '800', color: '#92400e' },
+  returnSub: { fontSize: 12, color: '#b45309', fontWeight: '600' },
 })
 
 // ── Modal styles ──────────────────────────────────────────────────────────────
