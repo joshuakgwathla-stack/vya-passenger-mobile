@@ -144,13 +144,10 @@ function TripCard({ trip, onBook }: { trip: any; onBook: () => void }) {
 function SlotPicker({
   trips, origin, destination, dateLabel, loading,
   onBook, onReset, onChangeDate, dateIdx, onDateIdx,
-  returnTrips, returnDateIdx, returnLoading, onReturnDateChange, onReturnBook, onReturnDateIdx,
 }: {
   trips: any[]; origin: string; destination: string; dateLabel: string; loading: boolean
   onBook: (id: string) => void; onReset: () => void
   onChangeDate: (idx: number) => void; dateIdx: number; onDateIdx: (i: number) => void
-  returnTrips?: any[]; returnDateIdx?: number; returnLoading?: boolean
-  onReturnDateChange?: (idx: number) => void; onReturnBook?: (id: string) => void; onReturnDateIdx?: (i: number) => void
 }) {
   return (
     <View style={slot.wrap}>
@@ -246,72 +243,6 @@ function SlotPicker({
         })
       )}
 
-      {/* Return trip section */}
-      {returnTrips !== undefined && onReturnBook && onReturnDateChange && onReturnDateIdx && (
-        <View style={slot.returnSection}>
-          <View style={slot.returnHeader}>
-            <Text style={slot.returnTitle}>🔄  Return trip</Text>
-            <Text style={slot.returnSub}>{destination} → {origin}</Text>
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={slot.dateRow}>
-            {DATES.map((d, i) => i >= (returnDateIdx ?? 0) - 1 && (
-              <TouchableOpacity
-                key={d.value}
-                style={[slot.datePill, (returnDateIdx ?? 0) === i && slot.datePillActive]}
-                onPress={() => { onReturnDateIdx(i); onReturnDateChange(i) }}
-              >
-                <Text style={[slot.datePillText, (returnDateIdx ?? 0) === i && slot.datePillTextActive]}>
-                  {d.short}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-
-          {returnLoading ? (
-            <View style={slot.loadingRow}>
-              <ActivityIndicator color={COLORS.navy} size="small" />
-              <Text style={slot.loadingText}>Finding return trips…</Text>
-            </View>
-          ) : returnTrips.length === 0 ? (
-            <View style={slot.empty}>
-              <Text style={slot.emptyText}>No slots on this date</Text>
-              <Text style={slot.emptyHint}>Try the next day</Text>
-            </View>
-          ) : (
-            returnTrips.map(trip => {
-              const dep = new Date(trip.departure_time)
-              const time = dep.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false })
-              const isPhantom = trip.driver_assigned === false
-              const isFullyBooked = trip.fully_booked === true
-              if (isFullyBooked) {
-                return (
-                  <View key={trip.id} style={[slot.row, slot.rowFullyBooked]}>
-                    <Text style={slot.timeBooked}>{time}</Text>
-                    <View style={{ flex: 1 }} />
-                    <Text style={slot.fullyBookedLabel}>Fully booked</Text>
-                  </View>
-                )
-              }
-              return (
-                <TouchableOpacity key={trip.id} style={slot.row} onPress={() => onReturnBook(trip.id)} activeOpacity={0.8}>
-                  {isPhantom && <View style={slot.phantomDot} />}
-                  <Text style={slot.time}>{time}</Text>
-                  <View style={{ flex: 1 }} />
-                  <Text style={slot.price}>R{Number(trip.price_per_seat).toFixed(0)}</Text>
-                  {isPhantom
-                    ? <Text style={slot.phantomLabel}>Driver TBC</Text>
-                    : <Text style={slot.seats}>{trip.available_seats} seats</Text>
-                  }
-                  <View style={[slot.bookBtn, isPhantom && slot.bookBtnDark]}>
-                    <Text style={slot.bookBtnText}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
-                  </View>
-                </TouchableOpacity>
-              )
-            })
-          )}
-        </View>
-      )}
     </View>
   )
 }
@@ -336,6 +267,7 @@ export default function HomeScreen() {
   const [returnDateIdx, setReturnDateIdx] = useState(1)
   const [returnResults, setReturnResults] = useState<any[]>([])
   const [returnLoading, setReturnLoading] = useState(false)
+  const [returnExpanded, setReturnExpanded] = useState(false)
   const scrollRef = useRef<ScrollView>(null)
 
   useEffect(() => { loadBookings(); initOriginCity() }, [])
@@ -598,7 +530,7 @@ export default function HomeScreen() {
 
         {/* Slot picker — shown once destination is selected */}
         {showSlots && (
-          <View style={{ paddingHorizontal: 16 }}>
+          <View style={{ paddingHorizontal: 16, gap: 12 }}>
             <SlotPicker
               trips={results}
               origin={origin}
@@ -610,13 +542,101 @@ export default function HomeScreen() {
               onChangeDate={handleSlotDateChange}
               dateIdx={dateIdx}
               onDateIdx={setDateIdx}
-              returnTrips={returnResults}
-              returnDateIdx={returnDateIdx}
-              returnLoading={returnLoading}
-              onReturnDateChange={idx => { setReturnDateIdx(idx); handleReturnSearch(idx) }}
-              onReturnBook={id => router.push(`/booking/${id}`)}
-              onReturnDateIdx={setReturnDateIdx}
             />
+
+            {/* Return trip — separate card, collapsed by default */}
+            <View style={styles.returnCard}>
+              <TouchableOpacity
+                style={styles.returnCardHeader}
+                onPress={() => {
+                  setReturnExpanded(e => !e)
+                  if (!returnExpanded && returnResults.length === 0) handleReturnSearch()
+                }}
+                activeOpacity={0.85}
+              >
+                <View style={styles.returnCardLeft}>
+                  <Text style={styles.returnCardIcon}>🔄</Text>
+                  <View>
+                    <Text style={styles.returnCardTitle}>Book your return trip</Text>
+                    <Text style={styles.returnCardSub}>{destination} → {origin}</Text>
+                  </View>
+                </View>
+                <Text style={styles.returnCardChevron}>{returnExpanded ? '▲' : '▼'}</Text>
+              </TouchableOpacity>
+
+              {returnExpanded && (
+                <View style={styles.returnCardBody}>
+                  <View style={styles.returnRoutePill}>
+                    <Text style={styles.returnRoutePillText}>
+                      {destination}  →  {origin}  ·  {DATES[returnDateIdx]?.short}
+                    </Text>
+                  </View>
+
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={slot.dateRow}>
+                    {DATES.map((d, i) => i >= dateIdx && (
+                      <TouchableOpacity
+                        key={d.value}
+                        style={[slot.datePill, returnDateIdx === i && slot.datePillActive]}
+                        onPress={() => { setReturnDateIdx(i); handleReturnSearch(i) }}
+                      >
+                        <Text style={[slot.datePillText, returnDateIdx === i && slot.datePillTextActive]}>
+                          {d.short}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+
+                  {returnLoading ? (
+                    <View style={slot.loadingRow}>
+                      <ActivityIndicator color={COLORS.navy} size="small" />
+                      <Text style={slot.loadingText}>Finding return trips…</Text>
+                    </View>
+                  ) : returnResults.length === 0 ? (
+                    <View style={slot.empty}>
+                      <Text style={slot.emptyIcon}>📅</Text>
+                      <Text style={slot.emptyText}>No slots on this date</Text>
+                      <Text style={slot.emptyHint}>Try another day</Text>
+                    </View>
+                  ) : (
+                    returnResults.map(trip => {
+                      const dep = new Date(trip.departure_time)
+                      const time = dep.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', hour12: false })
+                      const isPhantom = trip.driver_assigned === false
+                      const isFullyBooked = trip.fully_booked === true
+                      if (isFullyBooked) {
+                        return (
+                          <View key={trip.id} style={[slot.row, slot.rowFullyBooked]}>
+                            <Text style={slot.timeBooked}>{time}</Text>
+                            <View style={{ flex: 1 }} />
+                            <Text style={slot.fullyBookedLabel}>Fully booked</Text>
+                          </View>
+                        )
+                      }
+                      return (
+                        <TouchableOpacity
+                          key={trip.id}
+                          style={slot.row}
+                          onPress={() => router.push(`/booking/${trip.id}`)}
+                          activeOpacity={0.8}
+                        >
+                          {isPhantom && <View style={slot.phantomDot} />}
+                          <Text style={slot.time}>{time}</Text>
+                          <View style={{ flex: 1 }} />
+                          <Text style={slot.price}>R{Number(trip.price_per_seat).toFixed(0)}</Text>
+                          {isPhantom
+                            ? <Text style={slot.phantomLabel}>Driver TBC</Text>
+                            : <Text style={slot.seats}>{trip.available_seats} seats</Text>
+                          }
+                          <View style={[slot.bookBtn, isPhantom && slot.bookBtnDark]}>
+                            <Text style={slot.bookBtnText}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
+                          </View>
+                        </TouchableOpacity>
+                      )
+                    })
+                  )}
+                </View>
+              )}
+            </View>
           </View>
         )}
 
@@ -809,6 +829,32 @@ const styles = StyleSheet.create({
   bookAgainMeta: { fontSize: 12, color: COLORS.textSecondary, marginTop: 2 },
   bookAgainArrow: { fontSize: 22, color: COLORS.gold, fontWeight: '800' },
 
+  // Return trip card
+  returnCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 20, borderWidth: 1, borderColor: '#fde68a',
+    overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06, shadowRadius: 8, elevation: 3,
+  },
+  returnCardHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    padding: 16, backgroundColor: '#fffbeb',
+  },
+  returnCardLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  returnCardIcon: { fontSize: 24 },
+  returnCardTitle: { fontSize: 15, fontWeight: '800', color: '#92400e' },
+  returnCardSub: { fontSize: 12, color: '#b45309', fontWeight: '600', marginTop: 2 },
+  returnCardChevron: { fontSize: 12, color: '#b45309', fontWeight: '700' },
+  returnCardBody: { borderTopWidth: 1, borderTopColor: '#fde68a' },
+  returnRoutePill: {
+    backgroundColor: '#fffbeb', marginHorizontal: 16, marginTop: 12,
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 10, borderWidth: 1, borderColor: '#fde68a',
+    alignSelf: 'flex-start',
+  },
+  returnRoutePillText: { fontSize: 13, fontWeight: '700', color: '#92400e' },
+
   // Hub hint inside search card
   hubHint: {
     backgroundColor: COLORS.successLight, borderRadius: 10,
@@ -968,18 +1014,6 @@ const slot = StyleSheet.create({
   bookBtnDark: { backgroundColor: '#1e293b' },
   bookBtnText: { fontSize: 13, fontWeight: '800', color: COLORS.navy },
 
-  // Return trip section
-  returnSection: {
-    borderTopWidth: 2, borderTopColor: COLORS.gold + '44',
-    backgroundColor: '#fffbeb',
-  },
-  returnHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#fde68a',
-  },
-  returnTitle: { fontSize: 14, fontWeight: '800', color: '#92400e' },
-  returnSub: { fontSize: 12, color: '#b45309', fontWeight: '600' },
 })
 
 // ── Modal styles ──────────────────────────────────────────────────────────────
