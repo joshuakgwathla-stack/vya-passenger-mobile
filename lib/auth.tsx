@@ -10,6 +10,7 @@ interface User {
   phone: string
   profile_picture?: string
   role: string
+  is_verified: boolean
 }
 
 interface AuthContextType {

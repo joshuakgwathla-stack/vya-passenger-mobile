@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import {
   View, Text, TouchableOpacity, StyleSheet, SafeAreaView,
-  Platform, ScrollView, TextInput, Alert, ActivityIndicator,
+  Platform, ScrollView, TextInput, Alert, ActivityIndicator, Modal,
 } from 'react-native'
 import { useAuth } from '../../lib/auth'
-import { usersApi } from '../../lib/api'
+import { usersApi, authApi } from '../../lib/api'
 import { COLORS } from '../../constants'
 import { getSavedAddress, setSavedAddress, clearSavedAddress } from '../../lib/savedAddress'
 
@@ -20,6 +20,13 @@ export default function ProfileScreen() {
   const [saving, setSaving] = useState(false)
   const [homeAddress, setHomeAddress] = useState('')
   const [savingAddress, setSavingAddress] = useState(false)
+  // Phone verification
+  const [otpModal, setOtpModal] = useState(false)
+  const [otpCode, setOtpCode] = useState('')
+  const [otpChannel, setOtpChannel] = useState<'sms' | 'email' | null>(null)
+  const [otpEmail, setOtpEmail] = useState('')
+  const [otpSending, setOtpSending] = useState(false)
+  const [otpVerifying, setOtpVerifying] = useState(false)
 
   useEffect(() => {
     getSavedAddress().then(a => { if (a) setHomeAddress(a) })
@@ -88,6 +95,43 @@ export default function ProfileScreen() {
     ])
   }
 
+  const handleSendOtp = async () => {
+    if (!user?.phone) {
+      Alert.alert('No phone', 'Add a phone number to your profile first.')
+      return
+    }
+    setOtpSending(true)
+    try {
+      const { data } = await authApi.sendPhoneOtp(user.phone)
+      setOtpChannel(data.data?.channel || 'sms')
+      setOtpEmail(data.data?.email || '')
+      setOtpCode('')
+      setOtpModal(true)
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.message || 'Could not send OTP. Try again.')
+    } finally {
+      setOtpSending(false)
+    }
+  }
+
+  const handleVerifyOtp = async () => {
+    if (otpCode.length !== 6) {
+      Alert.alert('Invalid code', 'Enter the 6-digit code.')
+      return
+    }
+    setOtpVerifying(true)
+    try {
+      await authApi.verifyPhoneOtp(user!.phone, otpCode)
+      await refresh()
+      setOtpModal(false)
+      Alert.alert('Verified!', 'Your phone number has been verified.')
+    } catch (err: any) {
+      Alert.alert('Wrong code', err.response?.data?.message || 'Invalid or expired code. Try again.')
+    } finally {
+      setOtpVerifying(false)
+    }
+  }
+
   const handleLogout = () => {
     Alert.alert('Sign out', 'Are you sure you want to sign out?', [
       { text: 'Cancel', style: 'cancel' },
@@ -108,6 +152,59 @@ export default function ProfileScreen() {
           <Text style={styles.name}>{user?.first_name} {user?.last_name}</Text>
           <Text style={styles.email}>{user?.email}</Text>
         </View>
+
+        {/* Phone verification banner */}
+        {!user?.is_verified && (
+          <TouchableOpacity style={styles.verifyBanner} onPress={handleSendOtp} disabled={otpSending}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.verifyBannerTitle}>Verify your phone number</Text>
+              <Text style={styles.verifyBannerSub}>Required to make bookings</Text>
+            </View>
+            {otpSending
+              ? <ActivityIndicator color={COLORS.navy} size="small" />
+              : <Text style={styles.verifyBannerCta}>Verify →</Text>
+            }
+          </TouchableOpacity>
+        )}
+
+        {/* OTP modal */}
+        <Modal visible={otpModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setOtpModal(false)}>
+          <SafeAreaView style={styles.otpSafe}>
+            <View style={styles.otpContent}>
+              <Text style={styles.otpTitle}>Enter verification code</Text>
+              <Text style={styles.otpSub}>
+                {otpChannel === 'email'
+                  ? `We couldn't reach your phone via SMS, so we sent the code to ${otpEmail}`
+                  : `A 6-digit code was sent to ${user?.phone}`
+                }
+              </Text>
+              <TextInput
+                style={styles.otpInput}
+                value={otpCode}
+                onChangeText={t => setOtpCode(t.replace(/\D/g, '').slice(0, 6))}
+                keyboardType="number-pad"
+                placeholder="000000"
+                placeholderTextColor={COLORS.textMuted}
+                maxLength={6}
+                autoFocus
+              />
+              <TouchableOpacity style={styles.btn} onPress={handleVerifyOtp} disabled={otpVerifying}>
+                {otpVerifying
+                  ? <ActivityIndicator color="white" />
+                  : <Text style={styles.btnText}>Verify</Text>
+                }
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.otpResend} onPress={handleSendOtp} disabled={otpSending}>
+                <Text style={styles.otpResendText}>
+                  {otpSending ? 'Sending...' : 'Resend code'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setOtpModal(false)}>
+                <Text style={styles.otpCancel}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </Modal>
 
         {/* Tabs */}
         <View style={styles.tabs}>
@@ -260,4 +357,27 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 15, fontWeight: '800', color: COLORS.navy },
   sectionHint: { fontSize: 12, color: COLORS.textMuted, marginTop: -8, lineHeight: 17 },
   clearText: { fontSize: 13, color: COLORS.danger, fontWeight: '600', textAlign: 'center', paddingTop: 4 },
+
+  // Phone verification
+  verifyBanner: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: '#fffbeb', borderBottomWidth: 1, borderBottomColor: '#fde68a',
+    padding: 16, gap: 12,
+  },
+  verifyBannerTitle: { fontSize: 14, fontWeight: '700', color: '#92400e' },
+  verifyBannerSub: { fontSize: 12, color: '#b45309', marginTop: 1 },
+  verifyBannerCta: { fontSize: 14, fontWeight: '800', color: '#92400e' },
+
+  otpSafe: { flex: 1, backgroundColor: COLORS.white },
+  otpContent: { flex: 1, padding: 32, gap: 16 },
+  otpTitle: { fontSize: 22, fontWeight: '900', color: COLORS.navy, marginTop: 16 },
+  otpSub: { fontSize: 14, color: COLORS.textSecondary, lineHeight: 20 },
+  otpInput: {
+    borderWidth: 2, borderColor: COLORS.navy, borderRadius: 14,
+    padding: 18, fontSize: 32, fontWeight: '900', color: COLORS.navy,
+    letterSpacing: 14, textAlign: 'center', marginVertical: 8,
+  },
+  otpResend: { alignItems: 'center', paddingVertical: 8 },
+  otpResendText: { fontSize: 14, color: COLORS.navy, fontWeight: '600', textDecorationLine: 'underline' },
+  otpCancel: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', paddingVertical: 8 },
 })

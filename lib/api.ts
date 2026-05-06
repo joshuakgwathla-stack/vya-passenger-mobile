@@ -43,8 +43,8 @@ export const authApi = {
   register: (data: any) => api.post('/auth/register', data),
   me: () => api.get('/auth/me'),
   logout: (refreshToken: string) => api.post('/auth/logout', { refreshToken }),
-  sendPhoneOtp: (phone: string) => api.post('/auth/phone/send-otp', { phone }),
-  verifyPhoneOtp: (phone: string, otp: string) => api.post('/auth/phone/verify-otp', { phone, otp }),
+  sendPhoneOtp: (phone: string) => api.post('/auth/send-otp', { phone }),
+  verifyPhoneOtp: (phone: string, otp: string) => api.post('/auth/verify-otp', { phone, otp }),
 }
 
 export const tripsApi = {
