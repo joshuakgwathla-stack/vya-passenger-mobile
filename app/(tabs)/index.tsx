@@ -5,6 +5,7 @@ import {
   Animated, Pressable,
 } from 'react-native'
 import { useRouter } from 'expo-router'
+import { useNavigation } from '@react-navigation/native'
 import { tripsApi, bookingsApi } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
 import { COLORS, ORIGIN_CITIES, DESTINATION_CITIES } from '../../constants'
@@ -132,7 +133,7 @@ function TripCard({ trip, onBook }: { trip: any; onBook: () => void }) {
             </Text>
           )}
           <View style={[card.bookBtn, isPhantom && { backgroundColor: '#1e293b' }]}>
-            <Text style={card.bookBtnText}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
+            <Text style={[card.bookBtnText, isPhantom && { color: COLORS.gold }]}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
           </View>
         </View>
       </View>
@@ -236,7 +237,7 @@ function SlotPicker({
                 <Text style={slot.phantomLabel}>Driver TBC</Text>
               )}
               <View style={[slot.bookBtn, isPhantom && slot.bookBtnDark]}>
-                <Text style={slot.bookBtnText}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
+                <Text style={[slot.bookBtnText, isPhantom && slot.bookBtnTextDark]}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
               </View>
             </TouchableOpacity>
           )
@@ -251,6 +252,7 @@ function SlotPicker({
 export default function HomeScreen() {
   const { user } = useAuth()
   const router = useRouter()
+  const navigation = useNavigation()
 
   const [origin, setOrigin] = useState('Johannesburg')
   const [destination, setDestination] = useState('')
@@ -271,6 +273,19 @@ export default function HomeScreen() {
   const scrollRef = useRef<ScrollView>(null)
 
   useEffect(() => { loadBookings(); initOriginCity() }, [])
+
+  // Pressing the Home tab when already on it resets search state
+  useEffect(() => {
+    const unsub = navigation.addListener('tabPress' as any, () => {
+      setShowSlots(false)
+      setResults([])
+      setReturnExpanded(false)
+      setReturnResults([])
+      setDestination('')
+      scrollRef.current?.scrollTo({ y: 0, animated: true })
+    })
+    return unsub
+  }, [navigation])
 
   const initOriginCity = async () => {
     // 1 — use saved city if available (covers returning users)
@@ -628,7 +643,7 @@ export default function HomeScreen() {
                             : <Text style={slot.seats}>{trip.available_seats} seats</Text>
                           }
                           <View style={[slot.bookBtn, isPhantom && slot.bookBtnDark]}>
-                            <Text style={slot.bookBtnText}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
+                            <Text style={[slot.bookBtnText, isPhantom && slot.bookBtnTextDark]}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
                           </View>
                         </TouchableOpacity>
                       )
@@ -1013,6 +1028,7 @@ const slot = StyleSheet.create({
   },
   bookBtnDark: { backgroundColor: '#1e293b' },
   bookBtnText: { fontSize: 13, fontWeight: '800', color: COLORS.navy },
+  bookBtnTextDark: { color: COLORS.gold },
 
 })
 
