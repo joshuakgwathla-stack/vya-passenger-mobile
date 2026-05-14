@@ -48,8 +48,11 @@ export const authApi = {
 }
 
 export const tripsApi = {
-  search: (params: any) => api.get('/trips/search', { params }),
-  getTrip: (id: string) => api.get(`/trips/${id}`),
+  search:      (params: any) => api.get('/trips/search', { params }),
+  getTrip:     (id: string) => api.get(`/trips/${id}`),
+  suggestions: (q: string) => api.get('/trips/suggestions', { params: { q } }),
+  notifyMe:    (origin: string, destination: string) =>
+    api.post('/trips/notify-me', { origin, destination }),
 }
 
 export const bookingsApi = {

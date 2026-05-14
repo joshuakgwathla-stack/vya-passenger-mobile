@@ -1,15 +1,19 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   SafeAreaView, Platform, ActivityIndicator, Modal, FlatList,
-  Animated, Pressable,
+  Animated, Pressable, TextInput, KeyboardAvoidingView,
 } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useNavigation } from '@react-navigation/native'
 import { tripsApi, bookingsApi } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
-import { COLORS, ORIGIN_CITIES, DESTINATION_CITIES } from '../../constants'
+import {
+  COLORS, ORIGIN_CITIES, DESTINATION_CITIES,
+  getDestinationSuggestions, SearchSuggestion,
+} from '../../constants'
 import { getSavedCity, saveCity, detectOriginCity } from '../../lib/detectedCity'
+import { VyaIcon } from '../../components/VyaLogo'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const DATES = Array.from({ length: 14 }, (_, i) => {
@@ -24,12 +28,14 @@ const DATES = Array.from({ length: 14 }, (_, i) => {
 })
 
 const POPULAR_ROUTES = [
-  { origin: 'Johannesburg', destination: 'Polokwane',    price: 380, duration: '3.5h' },
-  { origin: 'Johannesburg', destination: 'Thohoyandou',  price: 450, duration: '5.3h' },
-  { origin: 'Johannesburg', destination: 'Tzaneen',      price: 420, duration: '4.5h' },
-  { origin: 'Johannesburg', destination: 'Giyani',       price: 430, duration: '4.8h' },
-  { origin: 'Pretoria',     destination: 'Polokwane',    price: 330, duration: '3h'   },
-  { origin: 'Johannesburg', destination: 'Phalaborwa',   price: 480, duration: '5.5h' },
+  { origin: 'Johannesburg', destination: 'Polokwane',   price: 380, duration: '3.5h' },
+  { origin: 'Johannesburg', destination: 'Thohoyandou', price: 450, duration: '5.3h' },
+  { origin: 'Johannesburg', destination: 'Tzaneen',     price: 420, duration: '4.5h' },
+  { origin: 'Johannesburg', destination: 'Giyani',      price: 430, duration: '4.8h' },
+  { origin: 'Pretoria',     destination: 'Polokwane',   price: 330, duration: '3h'   },
+  { origin: 'Johannesburg', destination: 'Phalaborwa',  price: 480, duration: '5.5h' },
+  { origin: 'Johannesburg', destination: 'Makhado',     price: 440, duration: '4.7h' },
+  { origin: 'Johannesburg', destination: 'Mankweng',    price: 400, duration: '4h'   },
 ]
 
 // ── City picker modal ─────────────────────────────────────────────────────────
@@ -66,6 +72,94 @@ function CityModal({
           ItemSeparatorComponent={() => <View style={modal.sep} />}
         />
       </SafeAreaView>
+    </Modal>
+  )
+}
+
+// ── Smart destination search modal ───────────────────────────────────────────
+// Replaces the flat city picker — shows node resolution ("Served via X") so
+// passengers understand how their destination maps onto the Vya network.
+function DestinationSearchModal({
+  visible, origin, onSelect, onClose,
+}: {
+  visible: boolean
+  origin: string
+  onSelect: (node: string, display: string) => void
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const suggestions = useMemo(() => getDestinationSuggestions(query), [query])
+
+  // Reset input each time modal opens
+  useEffect(() => { if (visible) setQuery('') }, [visible])
+
+  const handleSelect = (s: SearchSuggestion) => {
+    onSelect(s.node, s.display)
+    onClose()
+  }
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent statusBarTranslucent>
+      <KeyboardAvoidingView
+        style={dst.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        {/* Search panel */}
+        <View style={dst.panel}>
+          {/* From pill — shows context */}
+          <View style={dst.fromPill}>
+            <View style={dst.fromDot} />
+            <Text style={dst.fromPillText}>From <Text style={{ fontWeight: '800' }}>{origin}</Text></Text>
+          </View>
+
+          {/* Search input row */}
+          <View style={dst.inputRow}>
+            <View style={dst.toDot} />
+            <TextInput
+              style={dst.input}
+              placeholder="City, town, campus…"
+              placeholderTextColor={COLORS.textMuted}
+              value={query}
+              onChangeText={setQuery}
+              autoFocus
+              autoCorrect={false}
+              autoCapitalize="words"
+              returnKeyType="search"
+            />
+            <TouchableOpacity onPress={onClose} style={dst.cancelBtn}>
+              <Text style={dst.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Suggestions */}
+          <FlatList
+            data={suggestions}
+            keyExtractor={(_, i) => String(i)}
+            keyboardShouldPersistTaps="always"
+            style={dst.list}
+            ItemSeparatorComponent={() => <View style={dst.sep} />}
+            ListHeaderComponent={
+              !query ? (
+                <Text style={dst.sectionLabel}>Popular destinations</Text>
+              ) : null
+            }
+            renderItem={({ item }) => (
+              <TouchableOpacity style={dst.row} onPress={() => handleSelect(item)} activeOpacity={0.7}>
+                <View style={[dst.nodePin, item.subtitle === 'Direct stop' ? dst.nodePinDirect : dst.nodePinAlias]} />
+                <View style={dst.rowText}>
+                  <Text style={dst.rowDisplay}>{item.display}</Text>
+                  <Text style={[dst.rowSubtitle, item.subtitle !== 'Direct stop' && dst.rowSubtitleAlias]}>
+                    {item.subtitle}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+
+        {/* Backdrop — tap to dismiss */}
+        <TouchableOpacity style={dst.backdrop} onPress={onClose} activeOpacity={1} />
+      </KeyboardAvoidingView>
     </Modal>
   )
 }
@@ -145,10 +239,12 @@ function TripCard({ trip, onBook }: { trip: any; onBook: () => void }) {
 function SlotPicker({
   trips, origin, destination, dateLabel, loading,
   onBook, onReset, onChangeDate, dateIdx, onDateIdx,
+  onNotifyMe, notifyMeLoading, notifyMeRequested,
 }: {
   trips: any[]; origin: string; destination: string; dateLabel: string; loading: boolean
   onBook: (id: string) => void; onReset: () => void
   onChangeDate: (idx: number) => void; dateIdx: number; onDateIdx: (i: number) => void
+  onNotifyMe: () => void; notifyMeLoading: boolean; notifyMeRequested: boolean
 }) {
   return (
     <View style={slot.wrap}>
@@ -186,15 +282,42 @@ function SlotPicker({
         </View>
       ) : trips.length === 0 ? (
         <View style={slot.empty}>
-          <Text style={slot.emptyIcon}>📅</Text>
-          <Text style={slot.emptyText}>All slots filled on {dateLabel}</Text>
-          <Text style={slot.emptyHint}>These are the most popular travel days — try the next day for open seats</Text>
-          <TouchableOpacity
-            style={slot.tryTomorrowBtn}
-            onPress={() => { const next = Math.min(dateIdx + 1, DATES.length - 1); onDateIdx(next); onChangeDate(next) }}
-          >
-            <Text style={slot.tryTomorrowText}>Try next day →</Text>
-          </TouchableOpacity>
+          {notifyMeRequested ? (
+            <>
+              <Text style={slot.emptyIcon}>✅</Text>
+              <Text style={slot.emptyText}>We'll let you know!</Text>
+              <Text style={slot.emptyHint}>
+                You're on the list for {origin} → {destination}.{'\n'}
+                We'll notify you the moment trips become available.
+              </Text>
+            </>
+          ) : (
+            <>
+              <Text style={slot.emptyIcon}>🛣️</Text>
+              <Text style={slot.emptyText}>Not on Vya yet</Text>
+              <Text style={slot.emptyHint}>
+                We don't cover {origin} → {destination} yet.{'\n'}
+                Want us to notify you when we launch this route?
+              </Text>
+              <TouchableOpacity
+                style={[slot.notifyBtn, notifyMeLoading && { opacity: 0.6 }]}
+                onPress={onNotifyMe}
+                disabled={notifyMeLoading}
+                activeOpacity={0.8}
+              >
+                {notifyMeLoading
+                  ? <ActivityIndicator color={COLORS.white} size="small" />
+                  : <Text style={slot.notifyBtnText}>Notify me when available</Text>
+                }
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={slot.tryTomorrowBtn}
+                onPress={() => { const next = Math.min(dateIdx + 1, DATES.length - 1); onDateIdx(next); onChangeDate(next) }}
+              >
+                <Text style={slot.tryTomorrowText}>Try a different date →</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       ) : (
         trips.map(trip => {
@@ -263,8 +386,10 @@ export default function HomeScreen() {
   const [upcomingBooking, setUpcomingBooking] = useState<any>(null)
   const [lastBooking, setLastBooking] = useState<any>(null)
   const [showOriginPicker, setShowOriginPicker] = useState(false)
-  const [showDestPicker, setShowDestPicker] = useState(false)
+  const [showDestSearch, setShowDestSearch] = useState(false)
   const [detectingCity, setDetectingCity] = useState(false)
+  const [notifyMeLoading, setNotifyMeLoading] = useState(false)
+  const [notifyMeRequested, setNotifyMeRequested] = useState(false)
   // Return trip
   const [returnDateIdx, setReturnDateIdx] = useState(1)
   const [returnResults, setReturnResults] = useState<any[]>([])
@@ -273,6 +398,22 @@ export default function HomeScreen() {
   const scrollRef = useRef<ScrollView>(null)
 
   useEffect(() => { loadBookings(); initOriginCity() }, [])
+
+  // Auto-load last route's slots so returning users skip the search step
+  useEffect(() => {
+    if (lastBooking && !showSlots) {
+      const o = lastBooking.origin_city
+      const d = lastBooking.destination_city
+      if (o && d) {
+        setOrigin(o)
+        setDestination(d)
+        const nextReturnIdx = Math.min(1, DATES.length - 1)
+        setReturnDateIdx(nextReturnIdx)
+        handleSearch(o, d, 0)
+        handleReturnSearch(nextReturnIdx)
+      }
+    }
+  }, [lastBooking])
 
   // Pressing the Home tab when already on it resets search state
   useEffect(() => {
@@ -318,7 +459,7 @@ export default function HomeScreen() {
   const handleSearch = async (overrideOrigin?: string, overrideDest?: string, overrideDateIdx?: number) => {
     const o = overrideOrigin || origin
     const d = overrideDest || destination
-    if (!o || !d) { setShowDestPicker(true); return }
+    if (!o || !d) { setShowDestSearch(true); return }
     const idx = overrideDateIdx ?? dateIdx
     setLoading(true)
     setShowSlots(true)
@@ -374,6 +515,20 @@ export default function HomeScreen() {
     setResults([])
     setReturnResults([])
     setDestination('')
+    setNotifyMeRequested(false)
+  }
+
+  const handleNotifyMe = async () => {
+    setNotifyMeLoading(true)
+    try {
+      await tripsApi.notifyMe(origin, destination)
+      setNotifyMeRequested(true)
+    } catch {
+      // Even on error, give positive feedback — the request likely went through
+      setNotifyMeRequested(true)
+    } finally {
+      setNotifyMeLoading(false)
+    }
   }
 
   const selectedDate = DATES[dateIdx]
@@ -388,22 +543,21 @@ export default function HomeScreen() {
         title="Travelling from"
         options={ORIGIN_CITIES}
         selected={origin}
-        onSelect={v => { setOrigin(v); saveCity(v); setSearched(false) }}
+        onSelect={v => { setOrigin(v); saveCity(v); setShowSlots(false) }}
         onClose={() => setShowOriginPicker(false)}
       />
-      <CityModal
-        visible={showDestPicker}
-        title="Travelling to"
-        options={DESTINATION_CITIES}
-        selected={destination}
-        onSelect={v => {
-          setDestination(v)
+      <DestinationSearchModal
+        visible={showDestSearch}
+        origin={origin}
+        onSelect={(node, display) => {
+          setDestination(node)
+          setNotifyMeRequested(false)
           const nextReturnIdx = Math.min(dateIdx + 1, DATES.length - 1)
           setReturnDateIdx(nextReturnIdx)
-          handleSearch(origin, v)
+          handleSearch(origin, node)
           handleReturnSearch(nextReturnIdx)
         }}
-        onClose={() => setShowDestPicker(false)}
+        onClose={() => setShowDestSearch(false)}
       />
 
       <ScrollView
@@ -414,11 +568,9 @@ export default function HomeScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View>
-            <Text style={styles.logo}>VYA</Text>
-            <Text style={styles.greeting}>
-              Hello, {user?.first_name} 👋
-            </Text>
+          <View style={styles.headerLeft}>
+            <VyaIcon size={28} />
+            <Text style={styles.greeting}>Hello, {user?.first_name}</Text>
           </View>
           <TouchableOpacity
             style={styles.profileBtn}
@@ -501,7 +653,7 @@ export default function HomeScreen() {
                 }
               </TouchableOpacity>
               <View style={styles.fieldDivider} />
-              <TouchableOpacity style={styles.cityField} onPress={() => setShowDestPicker(true)}>
+              <TouchableOpacity style={styles.cityField} onPress={() => setShowDestSearch(true)}>
                 <Text style={styles.cityFieldLabel}>To</Text>
                 <Text style={[styles.cityFieldValue, !destination && styles.cityFieldPlaceholder]}>
                   {destination || 'Where to?'}
@@ -529,7 +681,7 @@ export default function HomeScreen() {
           </ScrollView>
 
           {!destination ? (
-            <TouchableOpacity style={styles.searchBtn} onPress={() => setShowDestPicker(true)}>
+            <TouchableOpacity style={styles.searchBtn} onPress={() => setShowDestSearch(true)}>
               <Text style={styles.searchBtnText}>📍  Where are you going?</Text>
             </TouchableOpacity>
           ) : loading ? (
@@ -557,6 +709,9 @@ export default function HomeScreen() {
               onChangeDate={handleSlotDateChange}
               dateIdx={dateIdx}
               onDateIdx={setDateIdx}
+              onNotifyMe={handleNotifyMe}
+              notifyMeLoading={notifyMeLoading}
+              notifyMeRequested={notifyMeRequested}
             />
 
             {/* Return trip — separate card, collapsed by default */}
@@ -728,8 +883,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  logo: { fontSize: 11, fontWeight: '900', color: COLORS.gold, letterSpacing: 4 },
-  greeting: { fontSize: 20, fontWeight: '800', color: COLORS.white, marginTop: 2 },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  greeting: { fontSize: 20, fontWeight: '800', color: COLORS.white },
   profileBtn: {
     width: 42, height: 42, borderRadius: 21,
     backgroundColor: COLORS.gold, alignItems: 'center', justifyContent: 'center',
@@ -997,11 +1152,15 @@ const slot = StyleSheet.create({
   emptyIcon: { fontSize: 36 },
   emptyText: { fontSize: 15, fontWeight: '700', color: COLORS.navy },
   emptyHint: { fontSize: 12, color: COLORS.textSecondary, textAlign: 'center', lineHeight: 18 },
-  tryTomorrowBtn: {
-    marginTop: 6, backgroundColor: COLORS.navy, borderRadius: 10,
-    paddingHorizontal: 20, paddingVertical: 10,
+  notifyBtn: {
+    marginTop: 8, backgroundColor: COLORS.gold, borderRadius: 12,
+    paddingHorizontal: 24, paddingVertical: 13, minWidth: 220, alignItems: 'center',
   },
-  tryTomorrowText: { color: COLORS.white, fontWeight: '700', fontSize: 13 },
+  notifyBtnText: { color: COLORS.navy, fontWeight: '800', fontSize: 14 },
+  tryTomorrowBtn: {
+    marginTop: 6, paddingVertical: 8,
+  },
+  tryTomorrowText: { color: COLORS.textMuted, fontWeight: '600', fontSize: 13 },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
     paddingHorizontal: 16, paddingVertical: 14,
@@ -1030,6 +1189,76 @@ const slot = StyleSheet.create({
   bookBtnText: { fontSize: 13, fontWeight: '800', color: COLORS.navy },
   bookBtnTextDark: { color: COLORS.gold },
 
+})
+
+// ── Destination search modal styles ──────────────────────────────────────────
+const dst = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(26,24,20,0.65)',
+    justifyContent: 'flex-start',
+  },
+  panel: {
+    backgroundColor: COLORS.white,
+    borderBottomLeftRadius: 24, borderBottomRightRadius: 24,
+    paddingTop: Platform.OS === 'ios' ? 56 : 32,
+    paddingBottom: 8,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18, shadowRadius: 24, elevation: 12,
+    maxHeight: '75%',
+  },
+  fromPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 20, paddingBottom: 12,
+  },
+  fromDot: {
+    width: 9, height: 9, borderRadius: 5,
+    backgroundColor: COLORS.success,
+    borderWidth: 2, borderColor: COLORS.successLight,
+  },
+  fromPillText: { fontSize: 13, color: COLORS.textSecondary },
+  inputRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 20, paddingBottom: 4,
+    borderBottomWidth: 1, borderBottomColor: COLORS.border,
+    paddingTop: 4,
+  },
+  toDot: {
+    width: 9, height: 9, borderRadius: 2,
+    backgroundColor: COLORS.navy,
+  },
+  input: {
+    flex: 1, fontSize: 17, fontWeight: '600', color: COLORS.text,
+    paddingVertical: 10,
+  },
+  cancelBtn: { paddingVertical: 8, paddingLeft: 4 },
+  cancelText: { fontSize: 14, fontWeight: '700', color: COLORS.gold },
+  sectionLabel: {
+    fontSize: 11, fontWeight: '700', color: COLORS.textMuted,
+    textTransform: 'uppercase', letterSpacing: 0.8,
+    paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6,
+  },
+  list: { maxHeight: 380 },
+  sep: { height: 1, backgroundColor: COLORS.border, marginLeft: 52 },
+  row: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingHorizontal: 20, paddingVertical: 14,
+  },
+  nodePin: {
+    width: 10, height: 10, borderRadius: 5,
+    borderWidth: 2,
+  },
+  nodePinDirect: {
+    backgroundColor: COLORS.navy, borderColor: COLORS.navy + '44',
+  },
+  nodePinAlias: {
+    backgroundColor: 'transparent', borderColor: COLORS.gold,
+  },
+  rowText: { flex: 1, gap: 2 },
+  rowDisplay: { fontSize: 15, fontWeight: '700', color: COLORS.text },
+  rowSubtitle: { fontSize: 12, color: COLORS.textMuted },
+  rowSubtitleAlias: { color: COLORS.gold, fontWeight: '600' },
+  backdrop: { flex: 1 },
 })
 
 // ── Modal styles ──────────────────────────────────────────────────────────────
