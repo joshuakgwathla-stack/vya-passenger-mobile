@@ -50,8 +50,12 @@ export const API_URL =
 
 export const ORIGIN_CITIES = ['Johannesburg', 'Pretoria', 'Midrand']
 
-// All canonical corridor nodes — the direct stops Vya serves
+// All canonical corridor nodes — includes both Limpopo AND Gauteng so passengers
+// travelling in either direction (Limpopo→Gauteng or Gauteng→Limpopo) can search.
 export const DESTINATION_CITIES = [
+  // Gauteng gateway cities (for Limpopo passengers heading south)
+  'Johannesburg', 'Pretoria', 'Midrand',
+  // Limpopo corridor nodes
   'Polokwane', 'Thohoyandou', 'Tzaneen', 'Giyani',
   'Burgersfort', 'Mokopane', 'Makhado',
   'Phalaborwa', 'Lebowakgomo', 'Hoedspruit',
@@ -93,6 +97,20 @@ export const SEARCH_ALIASES: Record<string, { node: string; display: string }> =
   'zimbabwe border':       { node: 'Musina',         display: 'Zimbabwe border crossing' },
   // Shorthand
   'lbk':                   { node: 'Lebowakgomo',    display: 'LBK' },
+  // Gauteng sub-areas — passengers in Limpopo heading south use these
+  'sandton':               { node: 'Johannesburg',   display: 'Sandton' },
+  'soweto':                { node: 'Johannesburg',   display: 'Soweto' },
+  'roodepoort':            { node: 'Johannesburg',   display: 'Roodepoort' },
+  'boksburg':              { node: 'Johannesburg',   display: 'Boksburg' },
+  'germiston':             { node: 'Johannesburg',   display: 'Germiston' },
+  'jhb':                   { node: 'Johannesburg',   display: 'JHB (Johannesburg)' },
+  'joburg':                { node: 'Johannesburg',   display: 'Joburg' },
+  'johannesburg cbd':      { node: 'Johannesburg',   display: 'Johannesburg CBD' },
+  'centurion':             { node: 'Pretoria',       display: 'Centurion' },
+  'hatfield':              { node: 'Pretoria',       display: 'Hatfield' },
+  'soshanguve':            { node: 'Pretoria',       display: 'Soshanguve' },
+  'pta':                   { node: 'Pretoria',       display: 'PTA (Pretoria)' },
+  'tshwane':               { node: 'Pretoria',       display: 'Tshwane' },
 }
 
 // Builds autocomplete suggestions for the destination search input.
