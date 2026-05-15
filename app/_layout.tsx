@@ -26,12 +26,17 @@ function RootNavigator() {
 
       const seg = segments[0]
       if (user) {
-        // Only redirect away from auth/onboarding — allow booking, trip, messages screens
+        // Logged in — redirect away from auth/onboarding screens only
         if (seg === '(auth)' || seg === '(onboarding)') router.replace('/(tabs)')
       } else if (!seen) {
+        // First install — show onboarding
         if (seg !== '(onboarding)') router.replace('/(onboarding)')
       } else {
-        if (seg !== '(auth)') router.replace('/(auth)/welcome')
+        // Seen onboarding, not logged in — allow guest browsing in tabs
+        // Only bounce off the onboarding screen (already completed)
+        if (seg === '(onboarding)') router.replace('/(tabs)')
+        // (auth) screens are fine — user may be voluntarily signing in
+        // (tabs), booking, trip, messages all allowed for guests
       }
     })
   }, [user, loading, fontsLoaded, segments])

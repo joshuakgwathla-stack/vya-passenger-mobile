@@ -6,6 +6,7 @@ import {
 } from 'react-native'
 import { useRouter } from 'expo-router'
 import { bookingsApi, reviewsApi } from '../../lib/api'
+import { useAuth } from '../../lib/auth'
 import { COLORS } from '../../constants'
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; label: string }> = {
@@ -165,6 +166,21 @@ function BoardingPass({
 
 export default function MyTripsScreen() {
   const router = useRouter()
+  const { user } = useAuth()
+
+  if (!user) return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+      <Text style={{ fontSize: 36, marginBottom: 16 }}>🎟️</Text>
+      <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 8, textAlign: 'center' }}>Your trips live here</Text>
+      <Text style={{ fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 21, marginBottom: 28 }}>Sign in to view your upcoming and past bookings.</Text>
+      <TouchableOpacity onPress={() => router.push('/(auth)/login')} style={{ backgroundColor: COLORS.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32 }}>
+        <Text style={{ color: COLORS.navy, fontSize: 15, fontWeight: '800' }}>Sign In</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => router.push('/(auth)/register')} style={{ marginTop: 12 }}>
+        <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>New to Vya? <Text style={{ color: COLORS.brass, fontWeight: '700' }}>Create account</Text></Text>
+      </TouchableOpacity>
+    </SafeAreaView>
+  )
   const [bookings, setBookings]     = useState<any[]>([])
   const [loading, setLoading]       = useState(true)
   const [refreshing, setRefreshing] = useState(false)

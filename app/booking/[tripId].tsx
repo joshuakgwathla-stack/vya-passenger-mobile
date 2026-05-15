@@ -228,6 +228,8 @@ export default function BookingScreen() {
   const [destHubs, setDestHubs] = useState<any[]>([])
   const [selectedDestHub, setSelectedDestHub] = useState<any>(null)
   const [showDestHubModal, setShowDestHubModal] = useState(false)
+  // Drop-off section collapsed by default — most users don't need it
+  const [showDropoff, setShowDropoff] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -283,6 +285,26 @@ export default function BookingScreen() {
     setSelectedDestHub(null)
     setDropoff('')
   }
+
+  if (!user) return (
+    <SafeAreaView style={[styles.center, { backgroundColor: COLORS.bg, padding: 32 }]}>
+      <Text style={{ fontSize: 36, marginBottom: 16 }}>🔐</Text>
+      <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 8, textAlign: 'center' }}>Sign in to book</Text>
+      <Text style={{ fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 21, marginBottom: 28 }}>Create a free account or sign in to secure your seat.</Text>
+      <TouchableOpacity
+        onPress={() => router.push('/(auth)/login')}
+        style={{ backgroundColor: COLORS.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 40, marginBottom: 12 }}
+      >
+        <Text style={{ color: COLORS.navy, fontSize: 15, fontWeight: '800' }}>Sign In</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
+        <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>New to Vya? <Text style={{ color: COLORS.brass, fontWeight: '700' }}>Create account</Text></Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
+        <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>← Back to trips</Text>
+      </TouchableOpacity>
+    </SafeAreaView>
+  )
 
   if (loading) {
     return (
@@ -428,7 +450,7 @@ export default function BookingScreen() {
     )
   }
 
-  const handleBook = async () => {
+  const handleBook = async (method: 'card' | 'eft' = 'card') => {
     if (!pickup.trim()) {
       Alert.alert('Pickup required', 'Enter your address or choose a pickup hub so your driver can find you.')
       return
@@ -455,7 +477,7 @@ export default function BookingScreen() {
         setSavedAddress(pickup.trim()).catch(() => {})
       }
 
-      if (payMethod === 'eft') {
+      if (method === 'eft') {
         // Show EFT proof-of-payment screen instead of navigating away
         setEftBookingId(bookingId)
         setEftPickupCode(pickupCode)
@@ -617,124 +639,94 @@ export default function BookingScreen() {
             <Text style={styles.addressHint}>Your driver comes to your door — no taxi rank needed.</Text>
           )}
 
-          {/* Drop-off section */}
-          <View style={styles.dropoffSection}>
-            <View style={styles.addressConnector} />
-
-            {/* Drop-off hub toggle (only shown if destination has hubs) */}
-            {destHubs.length > 0 && (
-              <View style={styles.dropoffModeTabs}>
-                <TouchableOpacity
-                  style={[styles.dropoffModeTab, !selectedDestHub && styles.dropoffModeTabActive]}
-                  onPress={clearDestHub}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.dropoffModeText, !selectedDestHub && styles.dropoffModeTextActive]}>🏠 My address</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.dropoffModeTab, !!selectedDestHub && styles.dropoffModeTabActive]}
-                  onPress={() => setShowDestHubModal(true)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.dropoffModeText, !!selectedDestHub && styles.dropoffModeTextActive]}>🏢 Hub drop-off</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Selected destination hub display */}
-            {selectedDestHub && (
-              <View style={[styles.selectedHubCard, { marginTop: 8 }]}>
-                <View style={styles.selectedHubInfo}>
-                  <Text style={styles.selectedHubName}>{selectedDestHub.name}</Text>
-                  <Text style={styles.selectedHubAddress} numberOfLines={1}>{selectedDestHub.address}</Text>
-                </View>
-                <TouchableOpacity style={styles.changeHubBtn} onPress={() => setShowDestHubModal(true)}>
-                  <Text style={styles.changeHubText}>Change</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            {/* Drop-off address input (locked when dest hub selected) */}
-            <View style={[selectedDestHub && { opacity: 0.5 }]} pointerEvents={selectedDestHub ? 'none' : 'auto'}>
-              <AddressInput
-                value={selectedDestHub ? `${selectedDestHub.name}, ${selectedDestHub.address}` : dropoff}
-                onChange={v => { setDropoff(v); if (selectedDestHub) setSelectedDestHub(null) }}
-                placeholder={`Drop-off in ${trip.alighting_city || trip.destination_city} (optional)`}
-                dotColor={COLORS.navy}
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* Steps */}
-        <View style={styles.stepsCard}>
-          <Text style={styles.stepsTitle}>What happens next</Text>
-          {[
-            'Pay securely via PayFast — your seat is held for 30 min',
-            'Get a booking code to show your driver at pickup',
-            'Track your driver live on the day of travel',
-          ].map((s, i) => (
-            <View key={i} style={styles.step}>
-              <View style={styles.stepNum}><Text style={styles.stepNumText}>{i + 1}</Text></View>
-              <Text style={styles.stepText}>{s}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* Payment method */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>How would you like to pay?</Text>
-          {([
-            { id: 'card', emoji: '💳', label: 'Card / Instant EFT', sub: 'Pay now securely via PayFast' },
-            { id: 'eft',  emoji: '🏦', label: 'Manual EFT',         sub: 'Bank transfer + upload proof' },
-          ] as const).map(opt => (
-            <TouchableOpacity
-              key={opt.id}
-              style={[styles.methodRow, payMethod === opt.id && styles.methodRowActive]}
-              onPress={() => setPayMethod(opt.id)}
-              activeOpacity={0.8}
-            >
-              <View style={[styles.methodRadio, payMethod === opt.id && styles.methodRadioActive]}>
-                {payMethod === opt.id && <View style={styles.methodRadioDot} />}
-              </View>
-              <Text style={styles.methodEmoji}>{opt.emoji}</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.methodLabel, payMethod === opt.id && { color: COLORS.navy }]}>{opt.label}</Text>
-                <Text style={styles.methodSub}>{opt.sub}</Text>
-              </View>
+          {/* Drop-off — collapsed by default */}
+          {!showDropoff ? (
+            <TouchableOpacity style={styles.addDropoffBtn} onPress={() => setShowDropoff(true)}>
+              <Text style={styles.addDropoffText}>+ Add drop-off address (optional)</Text>
             </TouchableOpacity>
-          ))}
+          ) : (
+            <View style={styles.dropoffSection}>
+              <View style={styles.addressConnector} />
+
+              {destHubs.length > 0 && (
+                <View style={styles.dropoffModeTabs}>
+                  <TouchableOpacity
+                    style={[styles.dropoffModeTab, !selectedDestHub && styles.dropoffModeTabActive]}
+                    onPress={clearDestHub}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.dropoffModeText, !selectedDestHub && styles.dropoffModeTextActive]}>My address</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.dropoffModeTab, !!selectedDestHub && styles.dropoffModeTabActive]}
+                    onPress={() => setShowDestHubModal(true)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.dropoffModeText, !!selectedDestHub && styles.dropoffModeTextActive]}>Hub drop-off</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {selectedDestHub && (
+                <View style={[styles.selectedHubCard, { marginTop: 8 }]}>
+                  <View style={styles.selectedHubInfo}>
+                    <Text style={styles.selectedHubName}>{selectedDestHub.name}</Text>
+                    <Text style={styles.selectedHubAddress} numberOfLines={1}>{selectedDestHub.address}</Text>
+                  </View>
+                  <TouchableOpacity style={styles.changeHubBtn} onPress={() => setShowDestHubModal(true)}>
+                    <Text style={styles.changeHubText}>Change</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              <View style={[selectedDestHub && { opacity: 0.5 }]} pointerEvents={selectedDestHub ? 'none' : 'auto'}>
+                <AddressInput
+                  value={selectedDestHub ? `${selectedDestHub.name}, ${selectedDestHub.address}` : dropoff}
+                  onChange={v => { setDropoff(v); if (selectedDestHub) setSelectedDestHub(null) }}
+                  placeholder={`Drop-off in ${trip.alighting_city || trip.destination_city}`}
+                  dotColor={COLORS.navy}
+                />
+              </View>
+            </View>
+          )}
         </View>
 
-        <View style={{ height: 120 }} />
+        <View style={{ height: 100 }} />
       </ScrollView>
 
-      {/* Sticky pay bar */}
+      {/* Sticky pay bar — card primary, EFT secondary link */}
       <View style={styles.payBar}>
         <View style={styles.payBarLeft}>
-          <Text style={styles.payBarLabel}>{seats} seat{seats !== 1 ? 's' : ''}{selectedHub ? ` · ${hubDiscount}% hub discount` : ''}</Text>
+          <Text style={styles.payBarLabel}>{seats} seat{seats !== 1 ? 's' : ''}{selectedHub ? ` · −${hubDiscount}%` : ''}</Text>
           {selectedHub ? (
             <View style={styles.payBarPriceRow}>
-              <Text style={styles.payBarStrike}>R{baseTotal.toFixed(2)}</Text>
+              <Text style={styles.payBarStrike}>R{baseTotal.toFixed(0)}</Text>
               <Text style={styles.payBarTotal}>R{finalTotal}</Text>
             </View>
           ) : (
             <Text style={styles.payBarTotal}>R{finalTotal}</Text>
           )}
         </View>
-        <TouchableOpacity
-          style={[styles.payBtn, (booking || paying) && styles.payBtnBusy]}
-          onPress={handleBook}
-          disabled={booking || paying}
-          activeOpacity={0.85}
-        >
-          {booking || paying
-            ? <ActivityIndicator color={COLORS.navy} />
-            : <Text style={styles.payBtnText}>
-                {payMethod === 'card' ? 'Pay with PayFast →' : 'Reserve via EFT →'}
-              </Text>
-          }
-        </TouchableOpacity>
+        <View style={styles.payBarRight}>
+          <TouchableOpacity
+            style={[styles.payBtn, (booking || paying) && styles.payBtnBusy]}
+            onPress={() => handleBook('card')}
+            disabled={booking || paying}
+            activeOpacity={0.85}
+          >
+            {booking || paying
+              ? <ActivityIndicator color={COLORS.navy} />
+              : <Text style={styles.payBtnText}>Confirm & Pay →</Text>
+            }
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => handleBook('eft')}
+            disabled={booking || paying}
+            style={styles.eftLink}
+          >
+            <Text style={styles.eftLinkText}>Pay via EFT instead</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <HubModal
@@ -946,6 +938,11 @@ const styles = StyleSheet.create({
   },
   payBtnBusy: { opacity: 0.7 },
   payBtnText: { color: COLORS.navy, fontWeight: '800', fontSize: 15 },
+  payBarRight: { alignItems: 'flex-end', gap: 4 },
+  eftLink: { paddingVertical: 4 },
+  eftLinkText: { fontSize: 11, color: COLORS.textMuted, textDecorationLine: 'underline', fontWeight: '500' },
+  addDropoffBtn: { paddingVertical: 10, alignItems: 'center' },
+  addDropoffText: { fontSize: 13, color: COLORS.gold, fontWeight: '600' },
 
   // Hub modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },

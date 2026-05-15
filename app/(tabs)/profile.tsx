@@ -3,13 +3,29 @@ import {
   View, Text, TouchableOpacity, StyleSheet, SafeAreaView,
   Platform, ScrollView, TextInput, Alert, ActivityIndicator, Modal,
 } from 'react-native'
+import { useRouter } from 'expo-router'
 import { useAuth } from '../../lib/auth'
 import { usersApi, authApi } from '../../lib/api'
 import { COLORS } from '../../constants'
 import { getSavedAddress, setSavedAddress, clearSavedAddress } from '../../lib/savedAddress'
 
 export default function ProfileScreen() {
+  const router = useRouter()
   const { user, logout, refresh } = useAuth()
+
+  if (!user) return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+      <Text style={{ fontSize: 36, marginBottom: 16 }}>👤</Text>
+      <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 8, textAlign: 'center' }}>Your profile</Text>
+      <Text style={{ fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 21, marginBottom: 28 }}>Sign in to manage your account, saved addresses, and preferences.</Text>
+      <TouchableOpacity onPress={() => router.push('/(auth)/login')} style={{ backgroundColor: COLORS.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32 }}>
+        <Text style={{ color: COLORS.navy, fontSize: 15, fontWeight: '800' }}>Sign In</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => router.push('/(auth)/register')} style={{ marginTop: 12 }}>
+        <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>New to Vya? <Text style={{ color: COLORS.brass, fontWeight: '700' }}>Create account</Text></Text>
+      </TouchableOpacity>
+    </SafeAreaView>
+  )
   const [tab, setTab] = useState<'info' | 'password'>('info')
   const [form, setForm] = useState({
     first_name: user?.first_name || '',
