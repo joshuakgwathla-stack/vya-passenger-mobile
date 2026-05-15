@@ -12,7 +12,7 @@ import {
   COLORS, ORIGIN_CITIES, DESTINATION_CITIES,
   getDestinationSuggestions, SearchSuggestion,
 } from '../../constants'
-import { getSavedCity, saveCity, detectOriginCity } from '../../lib/detectedCity'
+import { getSavedCity, saveCity, detectOriginCity, getNearestCity } from '../../lib/detectedCity'
 import { VyaIcon } from '../../components/VyaLogo'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
@@ -158,6 +158,71 @@ function DestinationSearchModal({
         </View>
 
         {/* Backdrop — tap to dismiss */}
+        <TouchableOpacity style={dst.backdrop} onPress={onClose} activeOpacity={1} />
+      </KeyboardAvoidingView>
+    </Modal>
+  )
+}
+
+// ── Smart origin search modal ─────────────────────────────────────────────────
+function OriginSearchModal({
+  visible, onSelect, onClose,
+}: {
+  visible: boolean
+  onSelect: (node: string) => void
+  onClose: () => void
+}) {
+  const [query, setQuery] = useState('')
+  const suggestions = useMemo(() => getDestinationSuggestions(query), [query])
+
+  useEffect(() => { if (visible) setQuery('') }, [visible])
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent statusBarTranslucent>
+      <KeyboardAvoidingView
+        style={dst.overlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={dst.panel}>
+          <View style={dst.inputRow}>
+            <View style={[dst.fromDot, { backgroundColor: COLORS.gold }]} />
+            <TextInput
+              style={dst.input}
+              placeholder="City, suburb, township…"
+              placeholderTextColor={COLORS.textMuted}
+              value={query}
+              onChangeText={setQuery}
+              autoFocus
+              autoCorrect={false}
+              autoCapitalize="words"
+              returnKeyType="search"
+            />
+            <TouchableOpacity onPress={onClose} style={dst.cancelBtn}>
+              <Text style={dst.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={suggestions}
+            keyExtractor={(_, i) => String(i)}
+            keyboardShouldPersistTaps="always"
+            style={dst.list}
+            ItemSeparatorComponent={() => <View style={dst.sep} />}
+            ListHeaderComponent={!query ? <Text style={dst.sectionLabel}>Your departure city</Text> : null}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={dst.row}
+                onPress={() => { onSelect(item.node); onClose() }}
+                activeOpacity={0.7}
+              >
+                <View style={[dst.nodePin, dst.nodePinDirect]} />
+                <View style={dst.rowText}>
+                  <Text style={dst.rowDisplay}>{item.display}</Text>
+                  <Text style={dst.rowSubtitle}>{item.subtitle}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
         <TouchableOpacity style={dst.backdrop} onPress={onClose} activeOpacity={1} />
       </KeyboardAvoidingView>
     </Modal>
@@ -390,6 +455,9 @@ export default function HomeScreen() {
   const [detectingCity, setDetectingCity] = useState(false)
   const [notifyMeLoading, setNotifyMeLoading] = useState(false)
   const [notifyMeRequested, setNotifyMeRequested] = useState(false)
+  const [gpsSuggestedCity, setGpsSuggestedCity] = useState('')
+  const [gpsState, setGpsState] = useState<'idle' | 'suggested'>('idle')
+  const [showOriginSearch, setShowOriginSearch] = useState(false)
   // Return trip
   const [returnDateIdx, setReturnDateIdx] = useState(1)
   const [returnResults, setReturnResults] = useState<any[]>([])
@@ -433,13 +501,13 @@ export default function HomeScreen() {
     const saved = await getSavedCity()
     if (saved) { setOrigin(saved); return }
 
-    // 2 — first launch: try GPS detection
+    // 2 — first launch: try GPS detection — show soft suggestion, don't silently set
     setDetectingCity(true)
     const detected = await detectOriginCity()
     setDetectingCity(false)
     if (detected) {
-      setOrigin(detected)
-      saveCity(detected)
+      setGpsSuggestedCity(detected)
+      setGpsState('suggested')
     }
     // 3 — no match: keep default 'Johannesburg'
   }
@@ -559,6 +627,11 @@ export default function HomeScreen() {
         }}
         onClose={() => setShowDestSearch(false)}
       />
+      <OriginSearchModal
+        visible={showOriginSearch}
+        onSelect={(node) => { setOrigin(node); saveCity(node); setGpsState('idle') }}
+        onClose={() => setShowOriginSearch(false)}
+      />
 
       <ScrollView
         ref={scrollRef}
@@ -630,6 +703,38 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
 
+        {/* GPS soft suggestion */}
+        {gpsState === 'suggested' && !showSlots && (
+          <View style={{
+            backgroundColor: COLORS.navyMid, borderRadius: 12, padding: 14,
+            marginBottom: 10, borderWidth: 1, borderColor: 'rgba(201,169,110,0.25)',
+            flexDirection: 'row', alignItems: 'center', gap: 10,
+          }}>
+            <Text style={{ fontSize: 20 }}>📍</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 13, color: COLORS.textInverse, fontWeight: '600' }}>
+                Looks like you&apos;re near{' '}
+                <Text style={{ color: COLORS.goldLight }}>{gpsSuggestedCity}</Text>
+              </Text>
+              <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>
+                Departing from there?
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => { setOrigin(gpsSuggestedCity); saveCity(gpsSuggestedCity); setGpsState('idle') }}
+              style={{ backgroundColor: COLORS.goldLight, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '800', color: COLORS.navy }}>Yes</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => { setGpsState('idle'); setShowOriginSearch(true) }}
+              style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: 'rgba(245,240,230,0.15)' }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted }}>Change</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Search card — hidden when slot picker is active */}
         {!showSlots && <View style={styles.searchCard}>
           <Text style={styles.searchTitle}>Book a trip</Text>
@@ -642,7 +747,7 @@ export default function HomeScreen() {
               <View style={styles.dotNavy} />
             </View>
             <View style={styles.routeFields}>
-              <TouchableOpacity style={styles.cityField} onPress={() => setShowOriginPicker(true)}>
+              <TouchableOpacity style={styles.cityField} onPress={() => setShowOriginSearch(true)}>
                 <Text style={styles.cityFieldLabel}>From</Text>
                 {detectingCity
                   ? <View style={styles.detectingRow}>

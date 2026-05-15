@@ -48,7 +48,13 @@ export const FONTS = {
 export const API_URL =
   process.env.EXPO_PUBLIC_API_URL || 'https://vya-backend-production.up.railway.app'
 
-export const ORIGIN_CITIES = ['Johannesburg', 'Pretoria', 'Midrand']
+export const ORIGIN_CITIES = [
+  'Johannesburg', 'Pretoria', 'Midrand',
+  'Polokwane', 'Thohoyandou', 'Tzaneen', 'Giyani', 'Burgersfort',
+  'Mokopane', 'Makhado', 'Phalaborwa', 'Lebowakgomo', 'Hoedspruit',
+  'Mankweng', 'Musina', 'Bela-Bela', 'Modimolle', 'Mookgophong',
+  'Lephalale', 'Modjadjiskloof', 'Letsitele', 'Marble Hall',
+]
 
 // All canonical corridor nodes — includes both Limpopo AND Gauteng so passengers
 // travelling in either direction (Limpopo→Gauteng or Gauteng→Limpopo) can search.
