@@ -497,19 +497,21 @@ export default function HomeScreen() {
   }, [navigation])
 
   const initOriginCity = async () => {
-    // 1 — use saved city if available (covers returning users)
-    const saved = await getSavedCity()
-    if (saved) { setOrigin(saved); return }
-
-    // 2 — first launch: try GPS detection — show soft suggestion, don't silently set
+    // Always attempt GPS first — departure city changes trip to trip
     setDetectingCity(true)
     const detected = await detectOriginCity()
     setDetectingCity(false)
+
     if (detected) {
+      // GPS found a city — always surface as a suggestion regardless of saved city
       setGpsSuggestedCity(detected)
       setGpsState('suggested')
+      setOrigin(detected) // pre-fill so search works even before user taps Yes
+    } else {
+      // GPS failed — silently fall back to saved city or default
+      const saved = await getSavedCity()
+      if (saved) setOrigin(saved)
     }
-    // 3 — no match: keep default 'Johannesburg'
   }
 
   const loadBookings = async () => {
