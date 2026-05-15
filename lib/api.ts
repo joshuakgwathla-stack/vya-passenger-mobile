@@ -99,3 +99,8 @@ export const reviewsApi = {
   submit: (data: { booking_id: string; rating: number; comment?: string }) =>
     api.post('/reviews', data),
 }
+
+export const safetyApi = {
+  panic: (data: { trip_id?: string; booking_id?: string; lat?: number; lng?: number }) =>
+    api.post('/safety/panic', data),
+}

@@ -1,13 +1,21 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, Alert, ActivityIndicator, Platform, TextInput,
+  Dimensions,
 } from 'react-native'
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
 import * as ImagePicker from 'expo-image-picker'
-import { bookingsApi, paymentsApi, reviewsApi } from '../../lib/api'
-import { COLORS } from '../../constants'
+import * as SecureStore from 'expo-secure-store'
+import * as Location from 'expo-location'
+import * as Linking from 'expo-linking'
+import { io, Socket } from 'socket.io-client'
+import { bookingsApi, paymentsApi, reviewsApi, tripsApi, safetyApi } from '../../lib/api'
+import { COLORS, API_URL } from '../../constants'
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window')
 
 function StarRating({ value, onChange }: { value: number; onChange?: (v: number) => void }) {
   return (
@@ -26,6 +34,7 @@ export default function TripDetailScreen() {
   const router = useRouter()
 
   const [booking, setBooking] = useState<any>(null)
+  const [trip, setTrip] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [cancelling, setCancelling] = useState(false)
   const [cancelPreview, setCancelPreview] = useState<any>(null)
@@ -36,18 +45,86 @@ export default function TripDetailScreen() {
   const [proofUri, setProofUri] = useState<string | null>(null)
   const [submittingProof, setSubmittingProof] = useState(false)
   const [payingCard, setPayingCard] = useState(false)
+  const [driverLocation, setDriverLocation] = useState<{
+    latitude: number
+    longitude: number
+    heading?: number
+  } | null>(null)
+  const [panicSent, setPanicSent] = useState(false)
+
+  const mapRef = useRef<MapView>(null)
+  const socketRef = useRef<Socket | null>(null)
+
+  // ── Load booking + trip ───────────────────────────────────────────────────
 
   useEffect(() => {
     if (!bookingId) return
-    bookingsApi.getBooking(bookingId)
+    const p1 = bookingsApi.getBooking(bookingId)
       .then(({ data }) => setBooking(data.data))
       .catch(() => Alert.alert('Error', 'Could not load booking'))
-      .finally(() => setLoading(false))
 
-    reviewsApi.getStatus(bookingId)
+    const p2 = id
+      ? tripsApi.getTrip(id).then(({ data }) => setTrip(data.data)).catch(() => {})
+      : Promise.resolve()
+
+    const p3 = reviewsApi.getStatus(bookingId)
       .then(({ data }) => setReviewed(data.data?.reviewed))
       .catch(() => {})
-  }, [bookingId])
+
+    Promise.all([p1, p2, p3]).finally(() => setLoading(false))
+  }, [bookingId, id])
+
+  // ── Live tracking: connect socket when trip is active ─────────────────────
+
+  useEffect(() => {
+    if (!trip || trip.status !== 'active' || !id) return
+
+    let socket: Socket
+
+    const connect = async () => {
+      const token = await SecureStore.getItemAsync('accessToken')
+      if (!token) return
+
+      socket = io(API_URL, {
+        auth: { token },
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 2000,
+      })
+      socketRef.current = socket
+
+      socket.on('connect', () => {
+        socket.emit('passenger:join_trip', id)
+      })
+
+      socket.on('trip:location', (data: any) => {
+        setDriverLocation({
+          latitude: data.latitude,
+          longitude: data.longitude,
+          heading: data.heading,
+        })
+        mapRef.current?.animateToRegion(
+          {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            latitudeDelta: 0.015,
+            longitudeDelta: 0.015,
+          },
+          600
+        )
+      })
+    }
+
+    connect()
+
+    return () => {
+      socket?.disconnect()
+      socketRef.current = null
+    }
+  }, [trip?.status, id])
+
+  // ── Actions ───────────────────────────────────────────────────────────────
 
   const handleCancel = async () => {
     setCancelling(true)
@@ -133,6 +210,8 @@ export default function TripDetailScreen() {
     }
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -149,6 +228,48 @@ export default function TripDetailScreen() {
   const isUnpaid = booking.payment_status === 'unpaid' && booking.status !== 'cancelled'
   const isCompleted = booking.status === 'completed'
   const isCancellable = ['confirmed', 'pending'].includes(booking.status) && new Date() < dep
+  const isTripActive = trip?.status === 'active'
+
+  const handlePanic = () => {
+    Alert.alert(
+      '🆘 Safety Alert',
+      'This will immediately notify the Vya safety team with your location. Use only in a genuine emergency.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send Alert',
+          style: 'destructive',
+          onPress: async () => {
+            // Get location silently — don't block if permission denied
+            let lat: number | undefined
+            let lng: number | undefined
+            try {
+              const { status } = await Location.requestForegroundPermissionsAsync()
+              if (status === 'granted') {
+                const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+                lat = pos.coords.latitude
+                lng = pos.coords.longitude
+              }
+            } catch {}
+
+            // Fire alert — fire-and-forget, never block the user
+            safetyApi.panic({ trip_id: id, booking_id: bookingId, lat, lng }).catch(() => {})
+            setPanicSent(true)
+
+            Alert.alert(
+              '✅ Alert Sent',
+              'The Vya safety team has been notified. Do you also want to call emergency services?',
+              [
+                { text: 'Call 10111 (Police)', onPress: () => Linking.openURL('tel:10111') },
+                { text: 'Call 112 (Emergency)', onPress: () => Linking.openURL('tel:112') },
+                { text: 'No, I\'m OK', style: 'cancel' },
+              ]
+            )
+          },
+        },
+      ]
+    )
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -158,8 +279,86 @@ export default function TripDetailScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.back}>
             <Text style={styles.backText}>← Back</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Booking Details</Text>
+          <Text style={styles.headerTitle}>
+            {isTripActive ? 'Trip in Progress' : 'Booking Details'}
+          </Text>
         </View>
+
+        {/* ── Live tracking map ─────────────────────────────────────────────── */}
+        {isTripActive && isPaid && (
+          <View style={styles.mapCard}>
+            <View style={styles.liveHeader}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveLabel}>LIVE</Text>
+              <Text style={styles.liveSubLabel}>Driver location</Text>
+            </View>
+
+            <MapView
+              ref={mapRef}
+              style={styles.map}
+              provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+              initialRegion={{
+                // Default: midpoint between Gauteng and Limpopo
+                latitude: -25.0,
+                longitude: 29.5,
+                latitudeDelta: 5.0,
+                longitudeDelta: 5.0,
+              }}
+              showsUserLocation
+              showsMyLocationButton={false}
+            >
+              {driverLocation && (
+                <Marker
+                  coordinate={driverLocation}
+                  title={booking.driver_first ? `${booking.driver_first} ${booking.driver_last}` : 'Your driver'}
+                  description={`${booking.vehicle_make || ''} ${booking.vehicle_model || ''} · ${booking.registration_number || ''}`.trim() || 'En route'}
+                >
+                  <View style={styles.driverMarker}>
+                    <Text style={styles.driverMarkerIcon}>🚐</Text>
+                  </View>
+                </Marker>
+              )}
+            </MapView>
+
+            {!driverLocation && (
+              <View style={styles.waitingOverlay}>
+                <ActivityIndicator color={COLORS.navy} size="small" />
+                <Text style={styles.waitingText}>Waiting for driver location...</Text>
+              </View>
+            )}
+
+            <Text style={styles.mapHint}>
+              Driver is sharing their live location with you
+            </Text>
+          </View>
+        )}
+
+        {/* ── Panic / SOS button — only during active trip ─────────────────── */}
+        {isTripActive && (
+          <TouchableOpacity
+            onPress={panicSent ? undefined : handlePanic}
+            activeOpacity={panicSent ? 1 : 0.8}
+            style={{
+              marginHorizontal: 16, marginBottom: 12,
+              backgroundColor: panicSent ? '#4b5563' : '#dc2626',
+              borderRadius: 14, paddingVertical: 16,
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
+              opacity: panicSent ? 0.7 : 1,
+            }}
+          >
+            <Text style={{ fontSize: 20 }}>🆘</Text>
+            <View>
+              <Text style={{ color: '#fff', fontSize: 15, fontWeight: '800', letterSpacing: 0.3 }}>
+                {panicSent ? 'Alert Sent — Team Notified' : 'Safety Alert (SOS)'}
+              </Text>
+              {!panicSent && (
+                <Text style={{ color: 'rgba(255,255,255,0.7)', fontSize: 11, marginTop: 1 }}>
+                  Tap to alert Vya safety team + call emergency services
+                </Text>
+              )}
+            </View>
+          </TouchableOpacity>
+        )}
 
         {/* Boarding pass */}
         {isPaid && (
@@ -190,7 +389,7 @@ export default function TripDetailScreen() {
             { label: 'Seats', value: `${booking.seats_booked} seat${booking.seats_booked !== 1 ? 's' : ''}` },
             { label: 'Amount', value: `R${Number(booking.total_price).toFixed(2)}` },
             { label: 'Payment', value: booking.payment_status },
-            { label: 'Status', value: booking.status },
+            { label: 'Status', value: isTripActive ? 'In progress' : booking.status },
             { label: 'Pickup', value: booking.pickup_address || '—' },
           ].map(({ label, value }) => (
             <View key={label} style={styles.row}>
@@ -356,6 +555,39 @@ const styles = StyleSheet.create({
   back: { padding: 4 },
   backText: { fontSize: 15, color: COLORS.navy, fontWeight: '600' },
   headerTitle: { fontSize: 18, fontWeight: '800', color: COLORS.navy },
+
+  // ── Live tracking map ──────────────────────────────────────────────────────
+  mapCard: {
+    backgroundColor: COLORS.white, borderRadius: 16, overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08, shadowRadius: 8, elevation: 3,
+  },
+  liveHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: COLORS.border,
+  },
+  liveDot: {
+    width: 8, height: 8, borderRadius: 4, backgroundColor: '#16a34a',
+  },
+  liveLabel: { fontSize: 11, fontWeight: '800', color: '#16a34a', letterSpacing: 1 },
+  liveSubLabel: { fontSize: 13, fontWeight: '600', color: COLORS.navy },
+  map: { width: SCREEN_WIDTH - 40, height: 240 },
+  waitingOverlay: {
+    position: 'absolute', bottom: 40, left: 0, right: 0,
+    alignItems: 'center', flexDirection: 'row', justifyContent: 'center',
+    gap: 8, paddingVertical: 10,
+    backgroundColor: 'rgba(245,240,230,0.92)',
+  },
+  waitingText: { fontSize: 13, color: COLORS.textSecondary, fontWeight: '600' },
+  driverMarker: { alignItems: 'center', justifyContent: 'center' },
+  driverMarkerIcon: { fontSize: 28 },
+  mapHint: {
+    fontSize: 11, color: COLORS.textMuted, textAlign: 'center',
+    paddingVertical: 8, paddingHorizontal: 16,
+  },
+
+  // ── Boarding pass ──────────────────────────────────────────────────────────
   boardingPass: {
     backgroundColor: COLORS.navy, borderRadius: 20, padding: 22,
     gap: 6, overflow: 'hidden',
@@ -368,6 +600,8 @@ const styles = StyleSheet.create({
   bpRoute: { fontSize: 20, fontWeight: '800', color: COLORS.white },
   bpMeta: { fontSize: 14, color: 'rgba(255,255,255,0.7)' },
   bpHint: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginTop: 6 },
+
+  // ── Cards ──────────────────────────────────────────────────────────────────
   card: { backgroundColor: COLORS.white, borderRadius: 14, padding: 18, gap: 14 },
   cardTitle: { fontSize: 14, fontWeight: '700', color: COLORS.navy },
   row: { flexDirection: 'row', justifyContent: 'space-between' },
@@ -386,6 +620,8 @@ const styles = StyleSheet.create({
     alignItems: 'center', borderWidth: 1, borderColor: COLORS.border,
   },
   chatBtnText: { fontSize: 14, fontWeight: '600', color: COLORS.navy },
+
+  // ── Cancel ─────────────────────────────────────────────────────────────────
   cancelCard: {
     backgroundColor: COLORS.dangerLight, borderRadius: 14, padding: 18,
     gap: 10, borderWidth: 1, borderColor: '#fca5a5',
@@ -412,6 +648,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.dangerLight, borderWidth: 1, borderColor: '#fca5a5',
   },
   cancelBtnText: { fontSize: 15, fontWeight: '700', color: COLORS.danger },
+
+  // ── Review ─────────────────────────────────────────────────────────────────
   field: { gap: 6 },
   label: { fontSize: 13, fontWeight: '600', color: COLORS.textSecondary },
   textArea: {
@@ -425,7 +663,7 @@ const styles = StyleSheet.create({
   reviewBtnText: { color: 'white', fontWeight: '700', fontSize: 14 },
   reviewedText: { fontSize: 14, color: COLORS.textSecondary, marginTop: 8, textAlign: 'center' },
 
-  // EFT pending
+  // ── EFT pending ────────────────────────────────────────────────────────────
   eftPendingCard: {
     backgroundColor: '#fff7ed', borderRadius: 14, padding: 18, gap: 8,
     borderWidth: 1, borderColor: '#fed7aa',
@@ -433,7 +671,7 @@ const styles = StyleSheet.create({
   eftPendingTitle: { fontSize: 15, fontWeight: '700', color: '#c2410c' },
   eftPendingText: { fontSize: 13, color: '#9a3412', lineHeight: 18 },
 
-  // Payment required
+  // ── Payment required ───────────────────────────────────────────────────────
   paySubtext: { fontSize: 13, color: COLORS.textSecondary, lineHeight: 18 },
   payCardBtn: {
     backgroundColor: COLORS.navy, borderRadius: 12, padding: 14, alignItems: 'center',
