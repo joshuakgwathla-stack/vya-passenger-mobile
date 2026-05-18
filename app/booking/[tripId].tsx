@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, TextInput, Alert, ActivityIndicator,
-  Platform, Keyboard, Modal, FlatList,
+  Platform, Keyboard, Modal, FlatList, Linking,
 } from 'react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
@@ -230,6 +230,8 @@ export default function BookingScreen() {
   const [showDestHubModal, setShowDestHubModal] = useState(false)
   // Drop-off section collapsed by default — most users don't need it
   const [showDropoff, setShowDropoff] = useState(false)
+  // Post-payment confirmation modal
+  const [confirmedBookingId, setConfirmedBookingId] = useState<string | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -492,8 +494,7 @@ export default function BookingScreen() {
         await WebBrowser.openBrowserAsync(payUrl)
         const statusRes = await paymentsApi.getStatus(bookingId)
         if (statusRes.data.data?.payment_status === 'paid') {
-          Alert.alert('Booking confirmed!', 'Your seat is secured. Check My Trips for details.')
-          router.replace(`/trip/${trip.id}?bookingId=${bookingId}`)
+          setConfirmedBookingId(bookingId)
         } else {
           Alert.alert('Payment pending', 'Finish payment to confirm your seat.', [
             { text: 'View Trip', onPress: () => router.replace(`/trip/${trip.id}?bookingId=${bookingId}`) },
@@ -516,8 +517,54 @@ export default function BookingScreen() {
     return dep.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'short' })
   })()
 
+  const handleConfirmedShare = () => {
+    if (!trip) return
+    const dep = trip.departure_time
+    const day = dep ? new Date(dep).toLocaleDateString('en-ZA', { weekday: 'long' }) : 'the weekend'
+    const dateStr = dep ? new Date(dep).toISOString().split('T')[0] : ''
+    const destination = trip.alighting_city || trip.destination_city
+    const origin = trip.origin_city
+    const price = trip.price_per_seat
+    const link = `https://app.vya-gae.com/trips?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&date=${dateStr}`
+    const msg = `I'm going home to ${destination} this ${day} with Vya 🚐\nR${Number(price).toFixed(0)} · Your driver fetches you — no taxi rank.\nSeats are still available — come travel with me 👇\n${link}`
+    Linking.openURL(`https://wa.me/?text=${encodeURIComponent(msg)}`)
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
+      {/* Post-payment confirmation modal */}
+      <Modal visible={!!confirmedBookingId} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: 'rgba(26,24,20,0.7)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 28, width: '100%', maxWidth: 380, alignItems: 'center' }}>
+            <Text style={{ fontSize: 40, marginBottom: 12 }}>🎉</Text>
+            <Text style={{ fontSize: 20, fontWeight: '800', color: '#1a1814', marginBottom: 6, textAlign: 'center' }}>
+              Seat Confirmed!
+            </Text>
+            <Text style={{ fontSize: 14, color: '#6b7280', textAlign: 'center', lineHeight: 22, marginBottom: 24 }}>
+              Your seat is secured.{'\n'}Know someone going your way?
+            </Text>
+            <TouchableOpacity
+              onPress={handleConfirmedShare}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(37,211,102,0.1)', borderWidth: 1, borderColor: '#25d366', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 20, marginBottom: 12, width: '100%', justifyContent: 'center' }}
+              activeOpacity={0.8}
+            >
+              <Text style={{ fontSize: 18 }}>📲</Text>
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#16a34a' }}>Invite a friend</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => {
+                setConfirmedBookingId(null)
+                router.replace(`/trip/${trip?.id}?bookingId=${confirmedBookingId}`)
+              }}
+              style={{ paddingVertical: 12, width: '100%', alignItems: 'center' }}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '600', color: '#6b7280' }}>View My Trip →</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backArrow}>←</Text>
