@@ -86,6 +86,8 @@ export const usersApi = {
   getNotifications: (params?: any) => api.get('/users/notifications', { params }),
   markNotificationRead: (id: string) => api.patch(`/users/notifications/${id}/read`),
   markAllRead: () => api.patch('/users/notifications/read-all'),
+  exportMyData: () => api.get('/users/me/export'),
+  deleteMyAccount: (password: string) => api.delete('/users/me', { data: { password } }),
 }
 
 export const messagesApi = {

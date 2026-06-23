@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   View, Text, TouchableOpacity, StyleSheet, SafeAreaView,
-  Platform, ScrollView, TextInput, Alert, ActivityIndicator, Modal,
+  Platform, ScrollView, TextInput, Alert, ActivityIndicator, Modal, Share,
 } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useAuth } from '../../lib/auth'
@@ -14,15 +14,15 @@ export default function ProfileScreen() {
   const { user, logout, refresh } = useAuth()
 
   if (!user) return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.offWhite, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
       <Text style={{ fontSize: 36, marginBottom: 16 }}>👤</Text>
-      <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 8, textAlign: 'center' }}>Your profile</Text>
+      <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.text, marginBottom: 8, textAlign: 'center' }}>Your profile</Text>
       <Text style={{ fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 21, marginBottom: 28 }}>Sign in to manage your account, saved addresses, and preferences.</Text>
       <TouchableOpacity onPress={() => router.push('/(auth)/login')} style={{ backgroundColor: COLORS.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32 }}>
         <Text style={{ color: COLORS.navy, fontSize: 15, fontWeight: '800' }}>Sign In</Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={() => router.push('/(auth)/register')} style={{ marginTop: 12 }}>
-        <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>New to Vya? <Text style={{ color: COLORS.brass, fontWeight: '700' }}>Create account</Text></Text>
+        <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>New to Vya? <Text style={{ color: COLORS.gold, fontWeight: '700' }}>Create account</Text></Text>
       </TouchableOpacity>
     </SafeAreaView>
   )
@@ -43,6 +43,9 @@ export default function ProfileScreen() {
   const [otpEmail, setOtpEmail] = useState('')
   const [otpSending, setOtpSending] = useState(false)
   const [otpVerifying, setOtpVerifying] = useState(false)
+  const [deleteModal, setDeleteModal] = useState(false)
+  const [deletePassword, setDeletePassword] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     getSavedAddress().then(a => { if (a) setHomeAddress(a) })
@@ -155,6 +158,41 @@ export default function ProfileScreen() {
     ])
   }
 
+  const handleExportData = async () => {
+    try {
+      const { data } = await usersApi.exportMyData()
+      const json = JSON.stringify(data.data, null, 2)
+      await Share.share({ message: json, title: 'My Vya Data Export' })
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.message || 'Could not export data. Try again.')
+    }
+  }
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete account',
+      'This will permanently wipe your personal information. Booking history is anonymised but retained for financial records. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Continue', style: 'destructive', onPress: () => { setDeletePassword(''); setDeleteModal(true) } },
+      ]
+    )
+  }
+
+  const confirmDeleteAccount = async () => {
+    if (!deletePassword) { Alert.alert('Required', 'Enter your password to confirm.'); return }
+    setDeleting(true)
+    try {
+      await usersApi.deleteMyAccount(deletePassword)
+      setDeleteModal(false)
+      logout()
+    } catch (err: any) {
+      Alert.alert('Error', err.response?.data?.message || 'Could not delete account. Try again.')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView>
@@ -216,6 +254,31 @@ export default function ProfileScreen() {
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => setOtpModal(false)}>
+                <Text style={styles.otpCancel}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </SafeAreaView>
+        </Modal>
+
+        {/* Delete account modal */}
+        <Modal visible={deleteModal} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setDeleteModal(false)}>
+          <SafeAreaView style={styles.otpSafe}>
+            <View style={styles.otpContent}>
+              <Text style={styles.otpTitle}>Delete your account</Text>
+              <Text style={styles.otpSub}>Enter your password to permanently delete your account. This cannot be undone.</Text>
+              <TextInput
+                style={styles.input}
+                value={deletePassword}
+                onChangeText={setDeletePassword}
+                secureTextEntry
+                placeholder="Your password"
+                placeholderTextColor={COLORS.textMuted}
+                autoFocus
+              />
+              <TouchableOpacity style={styles.deleteBtn} onPress={confirmDeleteAccount} disabled={deleting}>
+                {deleting ? <ActivityIndicator color="#ef4444" /> : <Text style={styles.deleteBtnText}>Delete my account</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.otpResend} onPress={() => setDeleteModal(false)}>
                 <Text style={styles.otpCancel}>Cancel</Text>
               </TouchableOpacity>
             </View>
@@ -316,6 +379,27 @@ export default function ProfileScreen() {
             </View>
           )}
 
+          {/* Privacy & Data */}
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Privacy & Data</Text>
+            <Text style={styles.sectionHint}>Your rights under POPIA — you can download or delete your personal information at any time</Text>
+            <TouchableOpacity style={styles.privacyBtn} onPress={handleExportData}>
+              <Text style={styles.privacyBtnText}>Download my data</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.deleteBtn} onPress={handleDeleteAccount}>
+              <Text style={styles.deleteBtnText}>Delete my account</Text>
+            </TouchableOpacity>
+            <View style={styles.legalLinks}>
+              <TouchableOpacity onPress={() => router.push('/legal/privacy-policy')}>
+                <Text style={styles.legalLink}>Privacy Policy</Text>
+              </TouchableOpacity>
+              <Text style={styles.legalDot}>·</Text>
+              <TouchableOpacity onPress={() => router.push('/legal/terms')}>
+                <Text style={styles.legalLink}>Terms of Service</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
           <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
             <Text style={styles.logoutText}>Sign Out</Text>
           </TouchableOpacity>
@@ -396,4 +480,19 @@ const styles = StyleSheet.create({
   otpResend: { alignItems: 'center', paddingVertical: 8 },
   otpResendText: { fontSize: 14, color: COLORS.navy, fontWeight: '600', textDecorationLine: 'underline' },
   otpCancel: { fontSize: 14, color: COLORS.textMuted, textAlign: 'center', paddingVertical: 8 },
+
+  // Privacy & Data
+  privacyBtn: {
+    borderWidth: 1, borderColor: COLORS.navy, borderRadius: 12,
+    padding: 14, alignItems: 'center',
+  },
+  privacyBtnText: { color: COLORS.navy, fontWeight: '700', fontSize: 14 },
+  deleteBtn: {
+    borderWidth: 1, borderColor: '#ef4444', borderRadius: 12,
+    padding: 14, alignItems: 'center',
+  },
+  deleteBtnText: { color: '#ef4444', fontWeight: '700', fontSize: 14 },
+  legalLinks: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingTop: 4 },
+  legalLink: { fontSize: 12, color: COLORS.gold, fontWeight: '600', textDecorationLine: 'underline' },
+  legalDot: { fontSize: 12, color: COLORS.textMuted },
 })

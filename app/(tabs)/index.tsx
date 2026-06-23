@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react'
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   SafeAreaView, Platform, ActivityIndicator, Modal, FlatList,
-  Animated, Pressable, TextInput, KeyboardAvoidingView,
+  Animated, Pressable, TextInput, KeyboardAvoidingView, Linking,
 } from 'react-native'
 import { useRouter } from 'expo-router'
 import { useNavigation } from '@react-navigation/native'
@@ -403,6 +403,16 @@ function SlotPicker({
             )
           }
 
+          const handleShare = (e: any) => {
+            e.stopPropagation?.()
+            const dep2 = new Date(trip.departure_time)
+            const day = dep2.toLocaleDateString('en-ZA', { weekday: 'long' })
+            const dateStr = dep2.toISOString().split('T')[0]
+            const link = `https://app.vya-gae.com/trips?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&date=${dateStr}`
+            const msg = `I'm going home to ${destination} this ${day} with Vya 🚐\nR${Number(trip.price_per_seat).toFixed(0)} · Your driver fetches you — no taxi rank.\nSeats are still available — come travel with me 👇\n${link}`
+            Linking.openURL(`https://wa.me/?text=${encodeURIComponent(msg)}`)
+          }
+
           return (
             <TouchableOpacity
               key={trip.id}
@@ -424,6 +434,13 @@ function SlotPicker({
               {isPhantom && (
                 <Text style={slot.phantomLabel}>Driver TBC</Text>
               )}
+              <TouchableOpacity
+                onPress={handleShare}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={slot.shareBtn}
+              >
+                <Text style={slot.shareBtnText}>📲</Text>
+              </TouchableOpacity>
               <View style={[slot.bookBtn, isPhantom && slot.bookBtnDark]}>
                 <Text style={[slot.bookBtnText, isPhantom && slot.bookBtnTextDark]}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
               </View>
@@ -889,6 +906,14 @@ export default function HomeScreen() {
                           </View>
                         )
                       }
+                      const handleReturnShare = () => {
+                        const dep2 = new Date(trip.departure_time)
+                        const day = dep2.toLocaleDateString('en-ZA', { weekday: 'long' })
+                        const dateStr = dep2.toISOString().split('T')[0]
+                        const link = `https://app.vya-gae.com/trips?origin=${encodeURIComponent(destination)}&destination=${encodeURIComponent(origin)}&date=${dateStr}`
+                        const msg = `I'm going home to ${origin} this ${day} with Vya 🚐\nR${Number(trip.price_per_seat).toFixed(0)} · Your driver fetches you — no taxi rank.\nSeats are still available — come travel with me 👇\n${link}`
+                        Linking.openURL(`https://wa.me/?text=${encodeURIComponent(msg)}`)
+                      }
                       return (
                         <TouchableOpacity
                           key={trip.id}
@@ -904,6 +929,13 @@ export default function HomeScreen() {
                             ? <Text style={slot.phantomLabel}>Driver TBC</Text>
                             : <Text style={slot.seats}>{trip.available_seats} seats</Text>
                           }
+                          <TouchableOpacity
+                            onPress={handleReturnShare}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            style={slot.shareBtn}
+                          >
+                            <Text style={slot.shareBtnText}>📲</Text>
+                          </TouchableOpacity>
                           <View style={[slot.bookBtn, isPhantom && slot.bookBtnDark]}>
                             <Text style={[slot.bookBtnText, isPhantom && slot.bookBtnTextDark]}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
                           </View>
@@ -1295,6 +1327,12 @@ const slot = StyleSheet.create({
   bookBtnDark: { backgroundColor: '#1e293b' },
   bookBtnText: { fontSize: 13, fontWeight: '800', color: COLORS.navy },
   bookBtnTextDark: { color: COLORS.gold },
+  shareBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: 'rgba(37,211,102,0.12)', borderWidth: 1, borderColor: '#25d366',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  shareBtnText: { fontSize: 15 },
 
 })
 

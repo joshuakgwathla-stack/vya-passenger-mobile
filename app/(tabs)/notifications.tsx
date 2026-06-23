@@ -26,9 +26,9 @@ export default function NotificationsScreen() {
   const [refreshing, setRefreshing] = useState(false)
 
   if (!user) return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.bg, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.offWhite, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
       <Text style={{ fontSize: 36, marginBottom: 16 }}>🔔</Text>
-      <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 8, textAlign: 'center' }}>Stay in the loop</Text>
+      <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.text, marginBottom: 8, textAlign: 'center' }}>Stay in the loop</Text>
       <Text style={{ fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 21, marginBottom: 28 }}>Sign in to receive trip updates, driver notifications, and alerts.</Text>
       <TouchableOpacity onPress={() => router.push('/(auth)/login')} style={{ backgroundColor: COLORS.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32 }}>
         <Text style={{ color: COLORS.navy, fontSize: 15, fontWeight: '800' }}>Sign In</Text>

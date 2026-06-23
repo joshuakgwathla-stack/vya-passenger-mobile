@@ -6,6 +6,7 @@ import {
 import { Link, useRouter } from 'expo-router'
 import { useAuth } from '../../lib/auth'
 import { COLORS } from '../../constants'
+import { VyaIcon } from '../../components/VyaLogo'
 
 export default function LoginScreen() {
   const { login } = useAuth()
@@ -32,8 +33,9 @@ export default function LoginScreen() {
       <ScrollView contentContainerStyle={styles.inner} keyboardShouldPersistTaps="handled">
         {/* Logo */}
         <View style={styles.logoArea}>
-          <Text style={styles.logo}>Vya</Text>
-          <Text style={styles.tagline}>Long-distance shuttles, simplified</Text>
+          <VyaIcon size={64} />
+          <Text style={styles.brandName}>vya</Text>
+          <Text style={styles.tagline}>Gauteng ↔ Limpopo</Text>
         </View>
 
         <View style={styles.card}>
@@ -93,7 +95,14 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.navy },
   inner: { flexGrow: 1, padding: 24, justifyContent: 'center' },
   logoArea: { alignItems: 'center', marginBottom: 40 },
-  logo: { fontSize: 48, fontWeight: '800', color: COLORS.gold, letterSpacing: -1 },
+  brandName: {
+    fontFamily: 'PlayfairDisplay_700Bold',
+    fontSize: 38,
+    fontWeight: '700',
+    color: '#f5f0e6',
+    letterSpacing: 6,
+    marginTop: 12,
+  },
   tagline: { fontSize: 14, color: 'rgba(255,255,255,0.5)', marginTop: 6 },
   card: {
     backgroundColor: COLORS.white, borderRadius: 20,

@@ -1,14 +1,7 @@
 import { Tabs } from 'expo-router'
-import { View, Text, Platform } from 'react-native'
+import { Platform } from 'react-native'
+import { Home, Ticket, Bell, User } from 'lucide-react-native'
 import { COLORS } from '../../constants'
-
-function TabIcon({ emoji, focused }: { emoji: string; focused: boolean }) {
-  return (
-    <View style={{ alignItems: 'center', justifyContent: 'center', width: 28, height: 28 }}>
-      <Text style={{ fontSize: focused ? 22 : 20 }}>{emoji}</Text>
-    </View>
-  )
-}
 
 export default function TabLayout() {
   return (
@@ -38,28 +31,28 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🏠" focused={focused} />,
+          tabBarIcon: ({ color, size }) => <Home color={color} size={size ?? 22} strokeWidth={2} />,
         }}
       />
       <Tabs.Screen
         name="bookings"
         options={{
           title: 'My Trips',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🎫" focused={focused} />,
+          tabBarIcon: ({ color, size }) => <Ticket color={color} size={size ?? 22} strokeWidth={2} />,
         }}
       />
       <Tabs.Screen
         name="notifications"
         options={{
           title: 'Alerts',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🔔" focused={focused} />,
+          tabBarIcon: ({ color, size }) => <Bell color={color} size={size ?? 22} strokeWidth={2} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="👤" focused={focused} />,
+          tabBarIcon: ({ color, size }) => <User color={color} size={size ?? 22} strokeWidth={2} />,
         }}
       />
     </Tabs>

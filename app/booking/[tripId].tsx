@@ -289,9 +289,9 @@ export default function BookingScreen() {
   }
 
   if (!user) return (
-    <SafeAreaView style={[styles.center, { backgroundColor: COLORS.bg, padding: 32 }]}>
+    <SafeAreaView style={[styles.center, { backgroundColor: COLORS.offWhite, padding: 32 }]}>
       <Text style={{ fontSize: 36, marginBottom: 16 }}>🔐</Text>
-      <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.textPrimary, marginBottom: 8, textAlign: 'center' }}>Sign in to book</Text>
+      <Text style={{ fontSize: 18, fontWeight: '800', color: COLORS.text, marginBottom: 8, textAlign: 'center' }}>Sign in to book</Text>
       <Text style={{ fontSize: 14, color: COLORS.textMuted, textAlign: 'center', lineHeight: 21, marginBottom: 28 }}>Create a free account or sign in to secure your seat.</Text>
       <TouchableOpacity
         onPress={() => router.push('/(auth)/login')}
@@ -300,7 +300,7 @@ export default function BookingScreen() {
         <Text style={{ color: COLORS.navy, fontSize: 15, fontWeight: '800' }}>Sign In</Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
-        <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>New to Vya? <Text style={{ color: COLORS.brass, fontWeight: '700' }}>Create account</Text></Text>
+        <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>New to Vya? <Text style={{ color: COLORS.gold, fontWeight: '700' }}>Create account</Text></Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20 }}>
         <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>← Back to trips</Text>
