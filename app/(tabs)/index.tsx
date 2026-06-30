@@ -240,7 +240,7 @@ function TripCard({ trip, onBook }: { trip: any; onBook: () => void }) {
     <TouchableOpacity style={card.wrap} onPress={onBook} activeOpacity={0.9}>
       {isPhantom && (
         <View style={card.phantomBanner}>
-          <Text style={card.phantomBannerText}>🕐 Driver being assigned — seat guaranteed</Text>
+          <Text style={card.phantomBannerText}>Filling up · driver being confirmed</Text>
         </View>
       )}
       <View style={card.top}>
@@ -268,8 +268,8 @@ function TripCard({ trip, onBook }: { trip: any; onBook: () => void }) {
               <Text style={{ fontSize: 18 }}>🚐</Text>
             </View>
             <View>
-              <Text style={card.driverName}>Driver TBC</Text>
-              <Text style={card.driverMeta}>A driver will be assigned before departure</Text>
+              <Text style={card.driverName}>Driver being confirmed</Text>
+              <Text style={card.driverMeta}>We'll confirm your driver well before departure</Text>
             </View>
           </View>
         ) : (
@@ -292,7 +292,7 @@ function TripCard({ trip, onBook }: { trip: any; onBook: () => void }) {
             </Text>
           )}
           <View style={[card.bookBtn, isPhantom && { backgroundColor: '#1e293b' }]}>
-            <Text style={[card.bookBtnText, isPhantom && { color: COLORS.gold }]}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
+            <Text style={[card.bookBtnText, isPhantom && { color: COLORS.gold }]}>{isPhantom ? 'Secure my seat →' : 'Book →'}</Text>
           </View>
         </View>
       </View>
@@ -432,7 +432,7 @@ function SlotPicker({
                 </Text>
               )}
               {isPhantom && (
-                <Text style={slot.phantomLabel}>Driver TBC</Text>
+                <Text style={slot.phantomLabel}>Confirming</Text>
               )}
               <TouchableOpacity
                 onPress={handleShare}
@@ -442,7 +442,7 @@ function SlotPicker({
                 <Text style={slot.shareBtnText}>📲</Text>
               </TouchableOpacity>
               <View style={[slot.bookBtn, isPhantom && slot.bookBtnDark]}>
-                <Text style={[slot.bookBtnText, isPhantom && slot.bookBtnTextDark]}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
+                <Text style={[slot.bookBtnText, isPhantom && slot.bookBtnTextDark]}>{isPhantom ? 'Secure my seat →' : 'Book →'}</Text>
               </View>
             </TouchableOpacity>
           )
@@ -926,7 +926,7 @@ export default function HomeScreen() {
                           <View style={{ flex: 1 }} />
                           <Text style={slot.price}>R{Number(trip.price_per_seat).toFixed(0)}</Text>
                           {isPhantom
-                            ? <Text style={slot.phantomLabel}>Driver TBC</Text>
+                            ? <Text style={slot.phantomLabel}>Confirming</Text>
                             : <Text style={slot.seats}>{trip.available_seats} seats</Text>
                           }
                           <TouchableOpacity
@@ -937,7 +937,7 @@ export default function HomeScreen() {
                             <Text style={slot.shareBtnText}>📲</Text>
                           </TouchableOpacity>
                           <View style={[slot.bookBtn, isPhantom && slot.bookBtnDark]}>
-                            <Text style={[slot.bookBtnText, isPhantom && slot.bookBtnTextDark]}>{isPhantom ? 'Secure →' : 'Book →'}</Text>
+                            <Text style={[slot.bookBtnText, isPhantom && slot.bookBtnTextDark]}>{isPhantom ? 'Secure my seat →' : 'Book →'}</Text>
                           </View>
                         </TouchableOpacity>
                       )
