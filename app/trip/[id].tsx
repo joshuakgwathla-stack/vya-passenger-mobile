@@ -165,8 +165,14 @@ export default function TripDetailScreen() {
       const payUrl = payRes.data.data?.redirect_url || payRes.data.data?.payment_url
       if (payUrl) {
         await WebBrowser.openBrowserAsync(payUrl)
-        const statusRes = await paymentsApi.getStatus(bookingId)
-        if (statusRes.data.data?.payment_status === 'paid') {
+        // Give Paystack webhook time to reach our backend before polling status
+        let paid = false
+        for (let attempt = 0; attempt < 4; attempt++) {
+          await new Promise(r => setTimeout(r, 2000))
+          const statusRes = await paymentsApi.getStatus(bookingId)
+          if (statusRes.data.data?.payment_status === 'paid') { paid = true; break }
+        }
+        if (paid) {
           const { data } = await bookingsApi.getBooking(bookingId)
           setBooking(data.data)
         } else {
