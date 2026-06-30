@@ -486,10 +486,10 @@ export default function BookingScreen() {
         return
       }
 
-      // Card — PayFast
+      // Card — Paystack
       setPaying(true)
       const payRes = await paymentsApi.initiate(bookingId)
-      const payUrl = payRes.data.data?.redirect_url || payRes.data.data?.payment_url
+      const payUrl = payRes.data.data?.authorization_url
       if (payUrl) {
         await WebBrowser.openBrowserAsync(payUrl)
         const statusRes = await paymentsApi.getStatus(bookingId)

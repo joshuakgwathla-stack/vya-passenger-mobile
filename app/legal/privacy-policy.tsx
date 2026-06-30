@@ -24,7 +24,7 @@ const sections = [
   },
   {
     heading: '5. Who We Share Your Information With',
-    body: `We do not sell your personal information. We share it only where necessary:\n\n• Drivers — your first name, phone, and pickup address for your confirmed trip\n• Passengers (drivers only) — first names and pickup locations for their trips\n• Payment processors — PayFast, for transaction processing\n• SMS providers — Africa's Talking, for OTP codes and notifications\n• Cloud infrastructure — Railway (API/database) and Vercel (web app)\n• Legal authorities — only when required by court order or law`,
+    body: `We do not sell your personal information. We share it only where necessary:\n\n• Drivers — your first name, phone, and pickup address for your confirmed trip\n• Passengers (drivers only) — first names and pickup locations for their trips\n• Payment processors — Paystack, for transaction processing\n• SMS providers — Africa's Talking, for OTP codes and notifications\n• Cloud infrastructure — Railway (API/database) and Vercel (web app)\n• Legal authorities — only when required by court order or law`,
   },
   {
     heading: '6. How We Protect Your Information',
